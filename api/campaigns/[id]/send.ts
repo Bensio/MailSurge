@@ -99,7 +99,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Use Inngest for reliable background email sending
     // This avoids Vercel's function timeout limitations
     try {
-      await inngest.send({
+      // Check if event key is set
+      if (!process.env.INNGEST_EVENT_KEY) {
+        console.error('[API] INNGEST_EVENT_KEY is not set!');
+        return res.status(500).json({ 
+          error: 'Inngest not configured', 
+          details: 'INNGEST_EVENT_KEY environment variable is missing'
+        });
+      }
+
+      console.log('[API] Sending Inngest event:', {
+        eventName: 'campaign/send',
+        campaignId: id,
+        userId: user.id,
+        hasAccessToken: !!accessToken,
+        hasRefreshToken: !!refreshToken,
+        eventKeySet: !!process.env.INNGEST_EVENT_KEY,
+        eventKeyPrefix: process.env.INNGEST_EVENT_KEY?.substring(0, 10) + '...',
+      });
+
+      const eventResult = await inngest.send({
         name: 'campaign/send',
         data: {
           campaignId: id,
@@ -109,7 +128,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       });
 
-      console.log('[API] Inngest event sent for campaign:', id);
+      console.log('[API] Inngest event sent successfully:', {
+        campaignId: id,
+        eventResult: eventResult,
+      });
       
       return res.status(200).json({ 
         status: 'started', 
