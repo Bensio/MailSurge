@@ -112,7 +112,7 @@ export const sendCampaignEmails = inngest.createFunction(
       );
 
     // Get campaign and contacts
-    const { data: campaign } = await step.run('get-campaign', async () => {
+    const campaign = await step.run('get-campaign', async () => {
       console.log('[Inngest Function] Fetching campaign:', campaignId);
       const { data, error } = await supabase
         .from('campaigns')
@@ -128,20 +128,32 @@ export const sendCampaignEmails = inngest.createFunction(
         console.error('[Inngest Function] Error fetching campaign:', error);
         throw error;
       }
+      
+      if (!data) {
+        console.error('[Inngest Function] Campaign not found in database:', { campaignId, userId });
+        throw new Error(`Campaign ${campaignId} not found for user ${userId}`);
+      }
+      
       console.log('[Inngest Function] Campaign found:', { 
-        id: data?.id, 
-        name: data?.name, 
-        contactCount: data?.contacts?.length || 0 
+        id: data.id, 
+        name: data.name, 
+        contactCount: data.contacts?.length || 0 
       });
       return data;
     });
 
     if (!campaign) {
-      throw new Error('Campaign not found');
+      console.error('[Inngest Function] Campaign is null/undefined after step:', { campaignId, userId });
+      throw new Error(`Campaign ${campaignId} not found after step execution`);
     }
 
     // Get user for email fallback
-    const { data: { user } } = await supabase.auth.admin.getUserById(userId);
+    const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(userId);
+    if (userError || !user) {
+      console.error('[Inngest Function] Error fetching user:', userError);
+      throw new Error(`User ${userId} not found or auth error: ${userError?.message || 'Unknown error'}`);
+    }
+    console.log('[Inngest Function] User found:', user.email);
 
     // Set up OAuth client
     const oauth2Client = new google.auth.OAuth2(
