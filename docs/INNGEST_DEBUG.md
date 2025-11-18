@@ -80,6 +80,30 @@ The endpoint should accept:
    - Make sure it's committed and pushed
    - Check Vercel deployment logs
 
+### Authentication Failed (`authentication_succeeded: false`)
+
+If the endpoint responds but shows `authentication_succeeded: false`:
+
+1. **Verify Signing Key:**
+   - Go to Inngest Dashboard → Settings → Keys
+   - Copy the **Signing Key** (not the Event Key)
+   - Go to Vercel → Settings → Environment Variables
+   - Make sure `INNGEST_SIGNING_KEY` matches exactly (no extra spaces, correct value)
+
+2. **Check for Typos:**
+   - The signing key is case-sensitive
+   - Make sure there are no leading/trailing spaces
+   - Copy-paste directly, don't type it
+
+3. **Redeploy After Changing Environment Variables:**
+   - After updating environment variables in Vercel, you need to redeploy
+   - Go to Vercel → Deployments → Click "Redeploy" on the latest deployment
+   - Or push a new commit to trigger a new deployment
+
+4. **Verify Both Keys Are Set:**
+   - `INNGEST_EVENT_KEY` - For sending events (from Inngest Dashboard → Keys)
+   - `INNGEST_SIGNING_KEY` - For authenticating requests (from Inngest Dashboard → Keys)
+
 ### Still Not Working?
 
 1. **Check Vercel Function Logs:**
