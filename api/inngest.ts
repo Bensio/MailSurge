@@ -253,82 +253,102 @@ export const sendCampaignEmails = inngest.createFunction(
 
 // Vercel serverless function handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Get the base URL from environment or headers
-  // Vercel provides VERCEL_URL in production, or we use headers
-  const getBaseUrl = () => {
-    // Check for explicit Inngest serve URL first
-    if (process.env.INNGEST_SERVE_URL) {
-      return process.env.INNGEST_SERVE_URL;
-    }
-    
-    // Use Vercel URL if available
-    if (process.env.VERCEL_URL) {
-      return `https://${process.env.VERCEL_URL}`;
-    }
-    
-    // Try to get from headers
-    const host = req.headers.host || req.headers['x-forwarded-host'];
-    const protocol = req.headers['x-forwarded-proto'] === 'https' || !host?.includes('localhost') ? 'https' : 'http';
-    
-    if (host) {
-      return `${protocol}://${host}`;
-    }
-    
-    // Fallback (shouldn't happen in production)
-    return 'https://localhost:3000';
-  };
+  try {
+    // Get the base URL from environment or headers
+    // Vercel provides VERCEL_URL in production, or we use headers
+    const getBaseUrl = () => {
+      // Check for explicit Inngest serve URL first
+      if (process.env.INNGEST_SERVE_URL) {
+        return process.env.INNGEST_SERVE_URL;
+      }
+      
+      // Use Vercel URL if available
+      if (process.env.VERCEL_URL) {
+        return `https://${process.env.VERCEL_URL}`;
+      }
+      
+      // Try to get from headers
+      const host = req.headers.host || req.headers['x-forwarded-host'];
+      const protocol = req.headers['x-forwarded-proto'] === 'https' || !host?.includes('localhost') ? 'https' : 'http';
+      
+      if (host) {
+        return `${protocol}://${host}`;
+      }
+      
+      // Fallback (shouldn't happen in production)
+      return 'https://localhost:3000';
+    };
 
-  const baseUrl = getBaseUrl();
-  const servePath = '/api/inngest';
+    const baseUrl = getBaseUrl();
+    const servePath = '/api/inngest';
 
-  // Inngest serve function for Vercel
-  const serveHandler = new InngestCommHandler({
-    client: inngest,
-    functions: [sendCampaignEmails],
-    signingKey: process.env.INNGEST_SIGNING_KEY,
-    frameworkName: 'vercel',
-    serveHost: baseUrl,
-    servePath: servePath,
-    handler: (req: VercelRequest) => {
-      // Extract body, headers, and method from Vercel request
-      const body = req.body ? JSON.stringify(req.body) : '';
-      const headers: Record<string, string> = {};
-      Object.keys(req.headers).forEach(key => {
-        const value = req.headers[key];
-        if (typeof value === 'string') {
-          headers[key] = value;
-        } else if (Array.isArray(value) && value[0]) {
-          headers[key] = value[0];
+    // Inngest serve function for Vercel
+    const serveHandler = new InngestCommHandler({
+      client: inngest,
+      functions: [sendCampaignEmails],
+      signingKey: process.env.INNGEST_SIGNING_KEY,
+      frameworkName: 'vercel',
+      serveHost: baseUrl,
+      servePath: servePath,
+      handler: (req: VercelRequest) => {
+        // Extract body, headers, and method from Vercel request
+        let body = '';
+        if (req.body) {
+          body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
         }
-      });
+        
+        const headers: Record<string, string> = {};
+        Object.keys(req.headers).forEach(key => {
+          const value = req.headers[key];
+          if (typeof value === 'string') {
+            headers[key] = value;
+          } else if (Array.isArray(value) && value[0]) {
+            headers[key] = value[0];
+          }
+        });
 
-      // Construct proper URL for Inngest
-      const path = req.url || servePath;
-      const url = new URL(path, baseUrl);
+        // Construct proper URL for Inngest
+        const path = req.url || servePath;
+        let url: URL;
+        try {
+          url = new URL(path, baseUrl);
+        } catch (error) {
+          // Fallback URL construction
+          url = new URL(servePath, baseUrl);
+        }
 
-      return {
-        body: () => Promise.resolve(body),
-        headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
-        method: () => Promise.resolve(req.method || 'GET'),
-        url: () => Promise.resolve(url),
-        queryString: (key: string, urlObj: URL) => {
-          return Promise.resolve(urlObj.searchParams.get(key));
-        },
-        transformResponse: ({ body, status, headers: responseHeaders }) => {
-          // Set status and headers on Vercel response
-          res.status(status);
-          Object.entries(responseHeaders || {}).forEach(([key, value]) => {
-            res.setHeader(key, value);
-          });
-          res.send(body);
-          return res;
-        },
-      };
-    },
-  });
+        return {
+          body: () => Promise.resolve(body),
+          headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
+          method: () => Promise.resolve(req.method || 'GET'),
+          url: () => Promise.resolve(url),
+          queryString: (key: string, urlObj: URL) => {
+            return Promise.resolve(urlObj.searchParams.get(key));
+          },
+          transformResponse: ({ body, status, headers: responseHeaders }) => {
+            // Set status and headers on Vercel response
+            res.status(status);
+            Object.entries(responseHeaders || {}).forEach(([key, value]) => {
+              res.setHeader(key, value);
+            });
+            res.send(body);
+            return res;
+          },
+        };
+      },
+    });
 
-  // Create a handler function that matches Vercel's request/response pattern
-  const handlerFn = serveHandler.createHandler();
-  return handlerFn(req);
+    // Create a handler function that matches Vercel's request/response pattern
+    const handlerFn = serveHandler.createHandler();
+    return await handlerFn(req);
+  } catch (error) {
+    console.error('[Inngest] Handler error:', error);
+    // Return a proper error response so Inngest knows the endpoint exists
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+    return;
+  }
 }
 
