@@ -14,7 +14,13 @@ Inngest is used for reliable background email sending, avoiding Vercel's serverl
 
 1. Go to [https://www.inngest.com](https://www.inngest.com)
 2. Sign up for a free account (Hobby plan includes 50,000 executions/month)
-3. Create a new app called "MailSurge"
+3. **Create a new app:**
+   - Go to https://app.inngest.com
+   - Click "+" or "Create App" button
+   - Name it "MailSurge"
+   - Click "Create"
+
+**Note:** If you used the Vercel integration and can't see your app, see `docs/INNGEST_MANUAL_SETUP.md` for manual setup instructions.
 
 ### 2. Get Your Inngest Keys
 
