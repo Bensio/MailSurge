@@ -158,7 +158,7 @@ export const sendCampaignEmails = inngest.createFunction(
     // Set up OAuth client
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    let redirectUri = process.env.GOOGLE_REDIRECT_URI;
     
     if (!clientId || !clientSecret || !redirectUri) {
       console.error('[Inngest Function] Missing Google OAuth credentials:', {
@@ -167,6 +167,12 @@ export const sendCampaignEmails = inngest.createFunction(
         hasRedirectUri: !!redirectUri,
       });
       throw new Error('Missing Google OAuth credentials in environment variables');
+    }
+    
+    // Ensure redirect URI has protocol (fix for missing https://)
+    if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+      console.warn('[Inngest Function] Redirect URI missing protocol, adding https://');
+      redirectUri = `https://${redirectUri}`;
     }
     
     console.log('[Inngest Function] OAuth client config:', {
