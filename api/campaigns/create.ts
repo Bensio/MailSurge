@@ -1,11 +1,36 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { CreateCampaignSchema } from '../lib/validations';
+import { z } from 'zod';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+// Inline validation schema to avoid import issues
+const CreateCampaignSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(255),
+  subject: z.string().min(1, 'Subject is required').max(500),
+  body_html: z.string().min(1, 'Email body is required'),
+  body_text: z.string().min(1, 'Plain text version is required'),
+  from_email: z.string().email('Invalid from email address').optional().nullable().or(z.literal('').transform(() => null)),
+  settings: z.object({
+    delay: z.number().min(30).max(300).default(45),
+    ccEmail: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
+  }).optional(),
+});
+
+// Initialize Supabase client inside handler to catch initialization errors
+let supabase: ReturnType<typeof createClient> | null = null;
+
+function getSupabase() {
+  if (!supabase) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_KEY;
+    
+    if (!url || !key) {
+      throw new Error('Missing Supabase environment variables');
+    }
+    
+    supabase = createClient(url, key);
+  }
+  return supabase;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set CORS headers
@@ -24,11 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Check environment variables
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-      console.error('Missing Supabase environment variables');
-      return res.status(500).json({ error: 'Server configuration error' });
-    }
+    // Initialize Supabase
+    const supabaseClient = getSupabase();
 
     // Get user from auth header
     const token = req.headers.authorization?.replace('Bearer ', '');
@@ -36,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
     if (authError || !user) {
       console.error('Auth error:', authError);
       return res.status(401).json({ error: 'Invalid token' });
@@ -54,13 +76,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Create campaign
-    const { data: campaign, error } = await supabase
+    const campaignData = {
+      ...validation.data,
+      user_id: user.id,
+      status: 'draft' as const,
+    };
+    
+    const { data: campaign, error } = await supabaseClient
       .from('campaigns')
-      .insert({
-        ...validation.data,
-        user_id: user.id,
-        status: 'draft',
-      })
+      .insert(campaignData as any)
       .select()
       .single();
 
@@ -75,9 +99,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(201).json(campaign);
   } catch (error) {
-    console.error('Unexpected error:', error);
+    console.error('Unexpected error in create campaign:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return res.status(500).json({ error: 'Internal server error', details: errorMessage });
+    const errorStack = error instanceof Error ? error.stack : 'No stack trace';
+    console.error('Error stack:', errorStack);
+    return res.status(500).json({ 
+      error: 'Internal server error', 
+      details: errorMessage,
+      stack: process.env.NODE_ENV === 'development' ? errorStack : undefined
+    });
   }
 }
 
