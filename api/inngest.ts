@@ -254,6 +254,17 @@ export const sendCampaignEmails = inngest.createFunction(
 // Vercel serverless function handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    // Log request for debugging
+    console.log('[Inngest] Request:', {
+      method: req.method,
+      url: req.url,
+      headers: {
+        'content-type': req.headers['content-type'],
+        'user-agent': req.headers['user-agent'],
+      },
+      hasBody: !!req.body,
+    });
+
     // Get the base URL from environment or headers
     // Vercel provides VERCEL_URL in production, or we use headers
     const getBaseUrl = () => {
@@ -292,9 +303,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       servePath: servePath,
       handler: (req: VercelRequest) => {
         // Extract body, headers, and method from Vercel request
+        // Vercel automatically parses JSON bodies, but we need to stringify for Inngest
         let body = '';
         if (req.body) {
-          body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+          if (typeof req.body === 'string') {
+            body = req.body;
+          } else {
+            // If it's already parsed (object), stringify it
+            body = JSON.stringify(req.body);
+          }
         }
         
         const headers: Record<string, string> = {};
@@ -340,9 +357,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Create a handler function that matches Vercel's request/response pattern
     const handlerFn = serveHandler.createHandler();
-    return await handlerFn(req);
+    const result = await handlerFn(req);
+    console.log('[Inngest] Response sent successfully');
+    return result;
   } catch (error) {
     console.error('[Inngest] Handler error:', error);
+    console.error('[Inngest] Error stack:', error instanceof Error ? error.stack : 'No stack');
     // Return a proper error response so Inngest knows the endpoint exists
     res.status(500).json({ 
       error: 'Internal server error',
