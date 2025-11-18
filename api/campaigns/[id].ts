@@ -7,6 +7,17 @@ const supabase = createClient(
 );
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Content-Type', 'application/json');
+
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const { id } = req.query;
 
   if (typeof id !== 'string') {
@@ -14,6 +25,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // Check environment variables
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+      console.error('Missing Supabase environment variables');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
     // Get user from auth header
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -22,6 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.error('Auth error:', authError);
       return res.status(401).json({ error: 'Invalid token' });
     }
 
@@ -34,7 +52,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('user_id', user.id)
         .single();
 
-      if (campaignError || !campaignData) {
+      if (campaignError) {
+        console.error('Campaign fetch error:', campaignError);
+        return res.status(404).json({ error: 'Campaign not found', details: campaignError.message });
+      }
+
+      if (!campaignData) {
+        console.error('Campaign data is null');
         return res.status(404).json({ error: 'Campaign not found' });
       }
 

@@ -205,6 +205,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const contacts = campaign.contacts || [];
     const delay = (campaign.settings?.delay || 45) * 1000;
+    
+    console.log('[API] Campaign contacts:', {
+      total: contacts.length,
+      contacts: contacts.map((c: any) => ({ id: c.id, email: c.email, status: c.status }))
+    });
 
     // Get sender email from Gmail profile
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -235,8 +240,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('campaigns')
         .update({ status: 'completed', completed_at: new Date().toISOString() })
         .eq('id', id);
+      console.log('[API] Campaign marked as completed - no contacts to send');
       return;
     }
+    
+    console.log(`[API] Found ${contactsToSend.length} contacts to send out of ${contacts.length} total`);
 
     console.log(`[API] Sending to ${contactsToSend.length} contacts (${contacts.length - contactsToSend.length} already sent)`);
     console.log(`[API] Sender email: ${senderEmail}`);
