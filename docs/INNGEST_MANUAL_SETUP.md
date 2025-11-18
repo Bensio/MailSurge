@@ -25,8 +25,15 @@ If the Vercel integration isn't working and you can't see your app, set it up ma
 1. **In the Inngest app you just created:**
    - Go to **Settings** → **App URL** (or "Sync URL")
    - Enter: `https://mail-surge.vercel.app/api/inngest`
+   - **IMPORTANT:** Must include:
+     - `https://` at the start
+     - Full domain: `mail-surge.vercel.app`
+     - Path: `/api/inngest`
+     - **NO trailing slash**
    - Make sure it's your **production** URL, not preview
    - Save
+
+**Common mistake:** If you only enter `mail-surge.vercel.app` (without `https://` and `/api/inngest`), the sync will be grayed out!
 
 ## Step 3: Add Keys to Vercel
 
