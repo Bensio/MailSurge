@@ -77,11 +77,27 @@ export const useCampaignStore = create<CampaignState>((set) => ({
         headers,
         body: JSON.stringify(data),
       });
+      
+      // Check content type before parsing
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        logger.error('API returned non-JSON response:', { status: response.status, contentType, text: text.substring(0, 200) });
+        throw new Error(`Server returned ${response.status}: ${text.substring(0, 100)}`);
+      }
+      
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          const text = await response.text();
+          throw new Error(`Failed to create campaign: ${response.status} ${text.substring(0, 100)}`);
+        }
         logger.error('API error creating campaign:', errorData);
         throw new Error(errorData.error || 'Failed to create campaign');
       }
+      
       const campaign = await response.json();
       logger.debug('campaignStore', 'Campaign created', { id: campaign.id });
       set((state) => ({
