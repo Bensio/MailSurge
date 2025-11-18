@@ -439,13 +439,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           url = new URL(servePath, baseUrl);
         }
 
-        // IMPORTANT: Signature validation requires the RAW body string
-        // InngestCommHandler will parse it internally for validation
-        // We must provide the exact raw string that was sent
+        // The body() function should return the raw string for signature validation
+        // InngestCommHandler uses it for signature verification, then parses it internally
+        // If bodyString is empty, return empty string (for GET requests)
         return {
-          // Provide raw body string for signature validation
-          // InngestCommHandler handles parsing internally
-          body: () => Promise.resolve(bodyString),
+          body: () => Promise.resolve(bodyString || ''),
           headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
           method: () => Promise.resolve(req.method || 'GET'),
           url: () => Promise.resolve(url),
