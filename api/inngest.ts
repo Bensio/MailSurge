@@ -372,7 +372,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return result;
   } catch (error) {
     console.error('[Inngest] Handler error:', error);
+    console.error('[Inngest] Error message:', error instanceof Error ? error.message : 'Unknown error');
     console.error('[Inngest] Error stack:', error instanceof Error ? error.stack : 'No stack');
+    
+    // Check if it's an authentication error
+    if (error instanceof Error && (error.message.includes('signature') || error.message.includes('authentication'))) {
+      console.error('[Inngest] Authentication error detected - check signing key match');
+      console.error('[Inngest] Signing key prefix:', process.env.INNGEST_SIGNING_KEY?.substring(0, 20) || 'NOT_SET');
+    }
+    
     // Return a proper error response so Inngest knows the endpoint exists
     res.status(500).json({ 
       error: 'Internal server error',
