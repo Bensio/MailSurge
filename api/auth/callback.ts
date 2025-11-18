@@ -31,11 +31,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Exchange code for tokens
+    let redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    
+    if (!redirectUri) {
+      return res.status(500).json({ error: 'GOOGLE_REDIRECT_URI not configured' });
+    }
+    
+    // Ensure redirect URI has protocol (fix for missing https://)
+    if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+      redirectUri = `https://${redirectUri}`;
+    }
+    
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      redirectUri
     );
+    
+    console.log('[OAuth Callback] Using redirect URI:', redirectUri);
 
     const { tokens } = await oauth2Client.getToken(code);
 
