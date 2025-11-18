@@ -160,7 +160,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // For large campaigns, consider using a queue system
     void (async () => {
       try {
+        console.log('[API] ===== BACKGROUND TASK STARTED =====');
         console.log('[API] Starting background email sending for campaign:', id);
+        console.log('[API] Environment check:', {
+          hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+          hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+          hasGoogleRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
+          hasSupabaseUrl: !!process.env.SUPABASE_URL,
+          hasSupabaseKey: !!process.env.SUPABASE_SERVICE_KEY,
+        });
         
         const oauth2Client = new google.auth.OAuth2(
           process.env.GOOGLE_CLIENT_ID,
@@ -169,8 +177,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         
         if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+          console.error('[API] Missing Google OAuth credentials');
           throw new Error('Google OAuth credentials not configured');
         }
+        
+        console.log('[API] OAuth2 client created successfully');
 
     // Set up token refresh handler
     oauth2Client.on('tokens', async (tokens) => {
@@ -212,21 +223,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Get sender email from Gmail profile
+    console.log('[API] Getting Gmail profile to determine sender email...');
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     let senderEmail: string;
     try {
+      console.log('[API] Calling gmail.users.getProfile...');
       const profile = await gmail.users.getProfile({ userId: 'me' });
+      console.log('[API] Gmail profile response:', { email: profile.data.emailAddress });
       senderEmail = profile.data.emailAddress || user.email || '';
       if (!senderEmail) {
+        console.error('[API] No email in profile and no user email');
         throw new Error('Could not determine sender email address');
       }
+      console.log('[API] Sender email determined:', senderEmail);
     } catch (error) {
-      console.error('Error getting Gmail profile:', error);
+      console.error('[API] Error getting Gmail profile:', error);
+      console.error('[API] Error details:', error instanceof Error ? error.message : 'Unknown');
+      console.error('[API] Error stack:', error instanceof Error ? error.stack : 'No stack');
       // Fallback to user email
       senderEmail = user.email || '';
       if (!senderEmail) {
+        console.error('[API] No fallback email available');
         throw new Error('Could not determine sender email address');
       }
+      console.log('[API] Using fallback sender email:', senderEmail);
     }
 
     // Filter contacts to only send to pending or failed contacts (skip already sent)
