@@ -469,14 +469,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           url = new URL(servePath, baseUrl);
         }
 
-        // For signature validation, Inngest needs the raw body string
-        // But for function execution, it may need the parsed object
-        // We'll provide the raw string for signature validation
-        // InngestCommHandler will handle parsing internally
+        // Handle different request types:
+        // - PUT requests (sync): Need parsed object for validation (this worked before)
+        // - POST requests (function execution): Need raw string for signature validation
+        const isSyncRequest = req.method === 'PUT';
+        
+        // For sync requests, provide parsed object
+        // For function execution, provide raw string for signature validation
+        let bodyToProvide: any;
+        if (isSyncRequest && bodyString) {
+          try {
+            bodyToProvide = JSON.parse(bodyString);
+          } catch (e) {
+            bodyToProvide = {};
+          }
+        } else {
+          // For function execution or other requests, use raw string
+          bodyToProvide = bodyString || '';
+        }
+        
         return {
-          // Provide raw body string for signature validation
-          // This is critical for authentication
-          body: () => Promise.resolve(bodyString || ''),
+          body: () => Promise.resolve(bodyToProvide),
           headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
           method: () => Promise.resolve(req.method || 'GET'),
           url: () => Promise.resolve(url),
