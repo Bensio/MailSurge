@@ -252,7 +252,7 @@ export const sendCampaignEmails = inngest.createFunction(
 );
 
 // Vercel serverless function handler
-// Note: Vercel automatically parses JSON bodies, but we need raw body for signature validation
+// We need the raw body string for Inngest signature validation
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Log immediately - this should always appear
   console.log('[Inngest] ===== FUNCTION CALLED =====');
@@ -261,25 +261,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('[Inngest] Timestamp:', new Date().toISOString());
   
   try {
-    // For PUT requests, we need to preserve the raw body for signature validation
-    // Vercel parses JSON automatically, but Inngest needs the exact raw string
-    // The issue: Vercel doesn't expose raw body easily, so we need to work around it
-    let rawBodyString: string | undefined;
+    // Read the raw body from the request stream
+    // This is necessary because Inngest needs the exact raw body string for signature validation
+    // Vercel may have already parsed it, but we'll try to read from stream first
+    let rawBodyString = '';
     
-    if (req.method === 'PUT') {
-      // Try to get raw body - Vercel might store it somewhere
-      const vercelReq = req as any;
-      rawBodyString = vercelReq.rawBody || vercelReq.bodyRaw;
-      
-      // If not available, we'll need to reconstruct from parsed body
-      // This is not ideal but might work if JSON.stringify produces the same format
-      if (!rawBodyString && req.body) {
-        if (typeof req.body === 'string') {
-          rawBodyString = req.body;
-        } else {
-          // Stringify with no spaces to match typical JSON format
-          rawBodyString = JSON.stringify(req.body);
-          console.log('[Inngest] WARNING: Reconstructing body from parsed object - signature may fail if format differs');
+    if (req.method === 'PUT' || req.method === 'POST') {
+      // Check if stream is still readable (not already consumed)
+      if (req.readable && typeof (req as any).read === 'function') {
+        try {
+          // Read raw body from stream
+          const chunks: Buffer[] = [];
+          await new Promise<void>((resolve) => {
+            // Check if stream has already ended
+            if ((req as any).readableEnded) {
+              // Stream already consumed, try to use req.body if available
+              if (req.body) {
+                rawBodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+                console.log('[Inngest] Using req.body (stream already consumed)');
+              }
+              resolve();
+              return;
+            }
+            
+            req.on('data', (chunk: Buffer) => {
+              chunks.push(chunk);
+            });
+            req.on('end', () => {
+              rawBodyString = Buffer.concat(chunks).toString('utf-8');
+              resolve();
+            });
+            req.on('error', (err) => {
+              console.error('[Inngest] Error reading request body:', err);
+              // Fallback to req.body if available
+              if (req.body) {
+                rawBodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+                console.log('[Inngest] Fallback to req.body after stream error');
+              }
+              resolve(); // Don't reject, try to continue
+            });
+          });
+          
+          if (rawBodyString) {
+            console.log('[Inngest] Raw body read from stream:', {
+              length: rawBodyString.length,
+              preview: rawBodyString.substring(0, 100),
+            });
+          }
+        } catch (streamError) {
+          console.error('[Inngest] Stream read error:', streamError);
+          // Fallback to req.body if available
+          if (req.body) {
+            rawBodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+            console.log('[Inngest] Fallback to req.body after stream exception');
+          }
+        }
+      } else {
+        // Stream not readable, use req.body
+        if (req.body) {
+          rawBodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+          console.log('[Inngest] Stream not readable, using req.body:', {
+            length: rawBodyString.length,
+            preview: rawBodyString.substring(0, 100),
+          });
         }
       }
     }
@@ -348,34 +392,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       servePath: servePath,
       handler: (req: VercelRequest) => {
         // Extract body, headers, and method from Vercel request
-        // IMPORTANT: For signature validation, we need the RAW body string, not the parsed object
-        // Vercel automatically parses JSON, but Inngest needs the raw string for signature verification
-        let body = '';
-        if (req.method === 'PUT' && rawBodyString) {
-          // Use the raw body string we captured earlier
-          body = rawBodyString;
-          console.log('[Inngest] Using raw body string for PUT request');
-        } else if (req.body) {
-          if (typeof req.body === 'string') {
-            body = req.body;
-          } else {
-            // If it's already parsed (object), stringify it
-            // Note: This may break signature validation for PUT requests
-            body = JSON.stringify(req.body);
-            if (req.method === 'PUT') {
-              console.log('[Inngest] WARNING: Using stringified parsed body - signature may fail');
-            }
-          }
-        }
+        // We have the raw body string from the stream, which is what Inngest needs for signature validation
+        const bodyString = rawBodyString;
         
         // Log body info for PUT requests
         if (req.method === 'PUT') {
           console.log('[Inngest] Body extraction:', {
-            hasBody: !!req.body,
-            bodyType: typeof req.body,
-            bodyLength: body.length,
+            bodyStringLength: bodyString.length,
             hasRawBody: !!rawBodyString,
-            bodyPreview: body.substring(0, 100),
+            bodyPreview: bodyString.substring(0, 100),
           });
         }
         
@@ -400,7 +425,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         return {
-          body: () => Promise.resolve(body),
+          // For signature validation, Inngest needs the raw body string
+          // But it also needs to parse it as an object for processing
+          // The InngestCommHandler should handle this, but we provide the raw string
+          body: () => Promise.resolve(bodyString),
           headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
           method: () => Promise.resolve(req.method || 'GET'),
           url: () => Promise.resolve(url),
