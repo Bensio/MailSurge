@@ -726,6 +726,7 @@ app.get('/api/templates/list', async (req, res) => {
 // Auth callback
 app.get('/api/auth/callback', async (req, res) => {
   try {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     console.log('=== OAuth Callback Started ===');
     console.log('Request received at:', new Date().toISOString());
     console.log('Query params:', { 
@@ -744,20 +745,21 @@ app.get('/api/auth/callback', async (req, res) => {
           <body>
             <h1>Error: Missing authorization code</h1>
             <p>Please try connecting Gmail again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
     }
 
     if (!state || typeof state !== 'string') {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       console.error('Missing state parameter');
       return res.status(400).send(`
         <html>
           <body>
             <h1>Error: Missing state parameter</h1>
             <p>Please try connecting Gmail again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -772,7 +774,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <body>
             <h1>Error: Invalid user token</h1>
             <p>Please sign in again and try connecting Gmail.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -796,7 +798,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <body>
             <h1>Error: Google OAuth not configured</h1>
             <p>Please configure Google OAuth credentials in .env file.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -832,7 +834,7 @@ app.get('/api/auth/callback', async (req, res) => {
             <p><strong>${errorMessage}</strong></p>
             <p>Error: ${tokenError.response?.data?.error || 'Unknown'}</p>
             <p>Please try connecting Gmail again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -845,7 +847,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <body>
             <h1>Error: No access token received</h1>
             <p>Please try connecting Gmail again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -876,7 +878,7 @@ app.get('/api/auth/callback', async (req, res) => {
             <h1>Error: Failed to retrieve Gmail email</h1>
             <p>Could not get your Gmail email address. Please try connecting again.</p>
             <p>Error: ${profileError instanceof Error ? profileError.message : 'Unknown error'}</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -901,7 +903,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <body>
             <h1>Error: Invalid Gmail email</h1>
             <p>Could not retrieve a valid Gmail email address. Please try connecting again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -945,7 +947,7 @@ app.get('/api/auth/callback', async (req, res) => {
             <h1>Error: Failed to save Gmail credentials</h1>
             <p>${updateError.message || 'Database update failed'}</p>
             <p>Please try again.</p>
-            <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+            <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
           </body>
         </html>
       `);
@@ -956,7 +958,8 @@ app.get('/api/auth/callback', async (req, res) => {
       accountsCount: accountsArray.length,
       accountsArray: accountsArray.map((acc) => acc.email)
     });
-    return res.redirect(302, 'http://localhost:3000/settings?gmail=connected');
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    return res.redirect(302, `${frontendUrl}/settings?gmail=connected`);
   } catch (error) {
     console.error('Unexpected error in OAuth callback:', error);
     console.error('Error stack:', error.stack);
@@ -965,6 +968,7 @@ app.get('/api/auth/callback', async (req, res) => {
       name: error.name,
       code: error.code
     });
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     return res.status(500).send(`
       <html>
         <body>
@@ -972,7 +976,7 @@ app.get('/api/auth/callback', async (req, res) => {
           <p><strong>${error.message || 'An unexpected error occurred'}</strong></p>
           <p>Check the server console for detailed error logs.</p>
           <p>Please try connecting Gmail again.</p>
-          <script>setTimeout(() => window.location.href = 'http://localhost:3000/settings', 3000);</script>
+          <script>setTimeout(() => window.location.href = '${frontendUrl}/settings', 3000);</script>
         </body>
       </html>
     `);

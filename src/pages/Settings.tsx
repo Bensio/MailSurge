@@ -235,7 +235,7 @@ export function Settings() {
                         <li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">Google Cloud Console</a></li>
                         <li>Create a project and enable Gmail API</li>
                         <li>Create OAuth 2.0 credentials (Web application)</li>
-                        <li>Add redirect URI: <code className="bg-blue-100 px-1 rounded">http://localhost:3000/api/auth/callback</code></li>
+                        <li>Add redirect URI: <code className="bg-blue-100 px-1 rounded">{import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/callback'}</code></li>
                         <li>Copy Client ID and Secret to your <code className="bg-blue-100 px-1 rounded">.env</code> file</li>
                         <li>Restart the dev server</li>
                       </ol>
