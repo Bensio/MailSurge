@@ -8,27 +8,40 @@ const supabase = createClient(
 );
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('[OAuth Callback] ===== CALLBACK CALLED =====');
+  console.log('[OAuth Callback] Method:', req.method);
+  console.log('[OAuth Callback] URL:', req.url);
+  console.log('[OAuth Callback] Query:', req.query);
+  
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const { code, state } = req.query;
+    
+    console.log('[OAuth Callback] Code present:', !!code);
+    console.log('[OAuth Callback] State present:', !!state);
 
     if (!code || typeof code !== 'string') {
+      console.error('[OAuth Callback] Missing authorization code');
       return res.status(400).json({ error: 'Missing authorization code' });
     }
 
     if (!state || typeof state !== 'string') {
+      console.error('[OAuth Callback] Missing state parameter');
       return res.status(400).json({ error: 'Missing state parameter' });
     }
 
     // Verify state contains user token
     const token = state;
+    console.log('[OAuth Callback] Verifying user token...');
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.error('[OAuth Callback] Invalid user token:', authError);
       return res.status(401).json({ error: 'Invalid user token' });
     }
+    console.log('[OAuth Callback] User verified:', user.id);
 
     // Exchange code for tokens
     let redirectUri = process.env.GOOGLE_REDIRECT_URI;
@@ -49,14 +62,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     
     console.log('[OAuth Callback] Using redirect URI:', redirectUri);
+    console.log('[OAuth Callback] Exchanging code for tokens...');
 
     const { tokens } = await oauth2Client.getToken(code);
+    console.log('[OAuth Callback] Tokens received:', {
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token,
+    });
 
     if (!tokens.access_token) {
+      console.error('[OAuth Callback] No access token in response');
       return res.status(400).json({ error: 'Failed to get access token' });
     }
 
     // Store tokens in user metadata
+    console.log('[OAuth Callback] Storing tokens in user metadata...');
     const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
       user_metadata: {
         ...user.user_metadata,
@@ -67,12 +87,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (updateError) {
-      console.error('Error updating user:', updateError);
+      console.error('[OAuth Callback] Error updating user:', updateError);
       return res.status(500).json({ error: 'Failed to save Gmail credentials' });
     }
+    
+    console.log('[OAuth Callback] Tokens stored successfully');
+    console.log('[OAuth Callback] Redirecting to /settings?gmail=connected');
 
-    // Redirect to success page
-    return res.redirect(302, '/settings?gmail=connected');
+    // Redirect to success page - use absolute URL for Vercel
+    const frontendUrl = process.env.FRONTEND_URL || 'https://mail-surge.vercel.app';
+    return res.redirect(302, `${frontendUrl}/settings?gmail=connected`);
   } catch (error) {
     console.error('Unexpected error:', error);
     return res.status(500).json({ error: 'Internal server error' });
