@@ -1,0 +1,71 @@
+Release v0.1.0 - Enterprise Contact Library & Email Campaign Management
+
+## Major Features
+
+### Enterprise Contact Library
+- Tabbed interface (Library / All / Campaigns) for better organization
+- Real-time search and filtering across all contacts
+- Bulk operations: select, delete, move to library, export CSV
+- Automatic deduplication of library contacts
+- Campaign association tracking
+
+### Email Campaign Management
+- Visual email editor with Unlayer
+- Multiple Gmail account support
+- Campaign sending with configurable delays
+- Retry failed campaigns functionality
+- Archive completed campaigns
+- Real-time progress tracking
+
+### Gmail Integration
+- OAuth 2.0 authentication
+- Multiple account support
+- Automatic token refresh
+- Direct email sending via Gmail API
+
+### Contact Management
+- Individual contact addition
+- CSV bulk upload
+- Library-based contact storage
+- Add contacts from library to campaigns
+- Status tracking (pending, sent, failed)
+
+## Technical Improvements
+
+- Centralized logging utility (development vs production)
+- Cleaned up all console.log statements
+- TypeScript strict mode
+- Zod schema validation
+- Proper error handling
+- Zustand state management
+
+## Database Migrations
+
+- 001_initial_schema.sql - Base schema with RLS
+- 002_add_contacts_library.sql - Contact library support
+- 003_add_from_email.sql - Campaign from_email field
+- 004_add_archived_status.sql - Archive functionality
+- 005_remove_duplicate_library_contacts.sql - Cleanup script
+
+## Files Added
+
+- src/lib/logger.ts - Centralized logging
+- src/components/ui/tabs.tsx - Tab component
+- src/components/ui/checkbox.tsx - Checkbox component
+- CHANGELOG.md - Version history
+- LICENSE - MIT License
+- RELEASE_v0.1.0.md - Release notes
+- .env.example - Environment variable template
+
+## Files Modified
+
+- package.json - Version updated to 0.1.0
+- README.md - Updated with current features
+- src/pages/Contacts.tsx - Complete redesign with enterprise features
+- src/components/contacts/ContactsTable.tsx - Added bulk selection
+- All source files - Cleaned up console.log statements
+
+## Breaking Changes
+
+None - This is the initial release.
+

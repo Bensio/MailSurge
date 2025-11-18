@@ -1,0 +1,82 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Testing
+coverage
+
+# Production
+dist
+build
+.vercel
+
+# Environment variables (keep .env.example in repo)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# TypeScript
+*.tsbuildinfo
+
+# Supabase
+.supabase
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+
+# Temporary documentation files (keep in repo but ignore these patterns)
+# *FIX*.md
+# *QUICK*.md
+# *TROUBLESHOOTING*.md
+# *STATUS*.md
+# *DEMO*.md
+# *SETUP*.md
+# *FINAL*.md
+# *PRE_COMMIT*.md
+# *COMMIT_MESSAGE*.md
+# *VERSION*.md
+# *RELEASE*.md
+
+# Keep these in repo:
+# !README.md
+# !CHANGELOG.md
+# !LICENSE
+# !docs/**/*.md
