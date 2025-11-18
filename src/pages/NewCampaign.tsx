@@ -49,7 +49,10 @@ export function NewCampaign() {
           setGmailAccounts(accounts);
           // Set default from_email to first account if available
           if (accounts.length > 0 && !formData.from_email) {
-            setFormData(prev => ({ ...prev, from_email: accounts[0].email }));
+            const firstAccount = accounts[0];
+            if (firstAccount?.email) {
+              setFormData(prev => ({ ...prev, from_email: firstAccount.email }));
+            }
           }
         }
       }, 200);
@@ -66,10 +69,14 @@ export function NewCampaign() {
       
       // Clear from_email if it's invalid (doesn't contain '@')
       if (formData.from_email && !formData.from_email.includes('@')) {
-        setFormData(prev => ({ ...prev, from_email: accounts.length > 0 ? accounts[0].email : '' }));
+        const firstAccount = accounts.length > 0 ? accounts[0] : null;
+        setFormData(prev => ({ ...prev, from_email: firstAccount?.email || '' }));
       } else if (accounts.length > 0 && !formData.from_email) {
         // Set default from_email to first account if available
-        setFormData(prev => ({ ...prev, from_email: accounts[0].email }));
+        const firstAccount = accounts[0];
+        if (firstAccount?.email) {
+          setFormData(prev => ({ ...prev, from_email: firstAccount.email }));
+        }
       } else if (accounts.length === 0) {
         // Clear from_email if no valid accounts
         setFormData(prev => ({ ...prev, from_email: '' }));

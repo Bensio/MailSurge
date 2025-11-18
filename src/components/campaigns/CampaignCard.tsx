@@ -14,6 +14,7 @@ const statusColors: Record<Campaign['status'], string> = {
   paused: 'bg-yellow-500',
   completed: 'bg-green-500',
   failed: 'bg-red-500',
+  archived: 'bg-gray-400',
 };
 
 export function CampaignCard({ campaign }: CampaignCardProps) {

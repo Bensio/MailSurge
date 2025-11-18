@@ -187,7 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Filter contacts to only send to pending or failed contacts (skip already sent)
     const contactsToSend = contacts.filter(
-      (c) => c.status === 'pending' || c.status === 'failed'
+      (c: { status: string }) => c.status === 'pending' || c.status === 'failed'
     );
 
     if (contactsToSend.length === 0) {
