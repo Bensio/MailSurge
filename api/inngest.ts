@@ -76,9 +76,24 @@ export const sendCampaignEmails = inngest.createFunction(
   },
   { event: 'campaign/send' },
   async ({ event, step }) => {
+    // Log immediately when function is triggered
+    console.log('[Inngest Function] ===== FUNCTION TRIGGERED =====');
+    console.log('[Inngest Function] Event received:', {
+      name: event.name,
+      id: event.id,
+      timestamp: event.ts,
+      dataKeys: Object.keys(event.data || {}),
+    });
+    
     const { campaignId, userId, accessToken, refreshToken } = event.data;
 
-    console.log('[Inngest] Starting email sending for campaign:', campaignId);
+    console.log('[Inngest Function] Starting email sending for campaign:', campaignId);
+    console.log('[Inngest Function] Event data:', {
+      campaignId,
+      userId,
+      hasAccessToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
+    });
 
     // Initialize Supabase
     const supabase = createClient(
