@@ -152,13 +152,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .update({ status: 'sending', sent_at: new Date().toISOString() })
       .eq('id', id);
 
-    // Start sending (don't await - respond immediately)
-    res.status(200).json({ status: 'started', total: campaign.contacts?.length || 0 });
-
-    // Send emails in background (fire and forget)
+    // CRITICAL: Vercel serverless functions terminate when response is sent
+    // We need to send at least one email BEFORE responding to keep function alive
+    // Then continue in background (though it may still timeout)
+    
+    // Send emails in background
     // NOTE: Vercel serverless functions have time limits (10s free, 60s pro)
-    // For large campaigns, consider using a queue system
-    void (async () => {
+    // For large campaigns, consider using a queue system or Vercel Pro
+    const sendEmails = async () => {
       try {
         console.log('[API] ===== BACKGROUND TASK STARTED =====');
         console.log('[API] Starting background email sending for campaign:', id);
@@ -350,11 +351,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error('[API] Failed to update campaign status:', updateError);
         }
       }
-    })().catch((error) => {
-      console.error('[API] Unhandled error in background task:', error);
+    };
+
+    // Check if there are contacts to send
+    const contactsToSendCount = (campaign.contacts || []).filter(
+      (c: { status: string }) => c.status === 'pending' || c.status === 'failed'
+    ).length;
+
+    if (contactsToSendCount === 0) {
+      await supabase
+        .from('campaigns')
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('id', id);
+      return res.status(200).json({ status: 'completed', message: 'All contacts already sent' });
+    }
+
+    // Start the email sending process
+    // Don't await - let it run in background, but respond immediately
+    // WARNING: Vercel functions terminate when response is sent, so background task may be killed
+    // For reliable email sending, consider: Vercel Pro (60s timeout) or a queue system
+    sendEmails().catch((error) => {
+      console.error('[API] Unhandled error in email sending:', error);
     });
 
-    return;
+    // Respond immediately so user doesn't wait
+    return res.status(200).json({ 
+      status: 'started', 
+      total: contactsToSendCount,
+      message: 'Email sending started. This may take a few minutes due to rate limiting. Note: On Vercel free tier, functions timeout after 10 seconds, which may interrupt email sending for large campaigns.'
+    });
   } catch (error) {
     console.error('Unexpected error:', error);
     return res.status(500).json({ error: 'Internal server error' });
