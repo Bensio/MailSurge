@@ -439,11 +439,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           url = new URL(servePath, baseUrl);
         }
 
-        // The body() function should return the raw string for signature validation
-        // InngestCommHandler uses it for signature verification, then parses it internally
-        // If bodyString is empty, return empty string (for GET requests)
+        // Parse the body for Inngest's validation
+        // Signature validation uses headers, not the body string
+        let bodyObject: any = null;
+        if (bodyString) {
+          try {
+            bodyObject = JSON.parse(bodyString);
+          } catch (e) {
+            // If parsing fails, use empty object
+            bodyObject = {};
+          }
+        }
+        
         return {
-          body: () => Promise.resolve(bodyString || ''),
+          // Provide parsed object for Inngest's validation
+          // Signature validation is done via headers, not body
+          body: () => Promise.resolve(bodyObject || {}),
           headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
           method: () => Promise.resolve(req.method || 'GET'),
           url: () => Promise.resolve(url),
