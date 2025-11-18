@@ -472,21 +472,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // Handle different request types:
-        // - PUT requests (sync): Need parsed object for validation (this worked before)
-        // - POST requests (function execution): Need raw string for signature validation
+        // - PUT requests (sync): Need parsed object for validation
+        // - POST requests (function execution): Need parsed object for function execution
+        //   BUT InngestCommHandler needs raw string for signature validation first
+        //   So we provide a function that returns the appropriate format
         const isSyncRequest = req.method === 'PUT';
+        const isFunctionExecution = req.method === 'POST' && req.query?.fnId;
         
-        // For sync requests, provide parsed object
-        // For function execution, provide raw string for signature validation
+        // For both sync and function execution, Inngest needs parsed object
+        // But signature validation happens first, so we need to handle both
         let bodyToProvide: any;
-        if (isSyncRequest && bodyString) {
+        if ((isSyncRequest || isFunctionExecution) && bodyString) {
           try {
             bodyToProvide = JSON.parse(bodyString);
           } catch (e) {
-            bodyToProvide = {};
+            console.error('[Inngest] Failed to parse body:', e);
+            bodyToProvide = bodyString || '';
           }
         } else {
-          // For function execution or other requests, use raw string
+          // For other requests, use raw string
           bodyToProvide = bodyString || '';
         }
         
