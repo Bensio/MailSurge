@@ -113,6 +113,7 @@ export const sendCampaignEmails = inngest.createFunction(
 
     // Get campaign and contacts
     const { data: campaign } = await step.run('get-campaign', async () => {
+      console.log('[Inngest Function] Fetching campaign:', campaignId);
       const { data, error } = await supabase
         .from('campaigns')
         .select(`
@@ -123,7 +124,15 @@ export const sendCampaignEmails = inngest.createFunction(
         .eq('user_id', userId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Inngest Function] Error fetching campaign:', error);
+        throw error;
+      }
+      console.log('[Inngest Function] Campaign found:', { 
+        id: data?.id, 
+        name: data?.name, 
+        contactCount: data?.contacts?.length || 0 
+      });
       return data;
     });
 
@@ -293,6 +302,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('[Inngest] Method:', req.method);
   console.log('[Inngest] URL:', req.url);
   console.log('[Inngest] Timestamp:', new Date().toISOString());
+  console.log('[Inngest] User-Agent:', req.headers['user-agent']);
+  console.log('[Inngest] This is a function execution request:', req.method === 'POST' && req.url?.includes('/fn/'));
   
   try {
     // Read the raw body from the request stream
