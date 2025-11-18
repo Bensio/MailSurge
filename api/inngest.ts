@@ -265,6 +265,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hasBody: !!req.body,
     });
 
+    // Debug: Check if signing key is set (don't log the actual key for security)
+    const signingKeySet = !!process.env.INNGEST_SIGNING_KEY;
+    const signingKeyLength = process.env.INNGEST_SIGNING_KEY?.length || 0;
+    const signingKeyPrefix = process.env.INNGEST_SIGNING_KEY?.substring(0, 20) || 'NOT_SET';
+    console.log('[Inngest] Signing key check:', {
+      isSet: signingKeySet,
+      length: signingKeyLength,
+      prefix: signingKeyPrefix + '...',
+    });
+
     // Get the base URL from environment or headers
     // Vercel provides VERCEL_URL in production, or we use headers
     const getBaseUrl = () => {
