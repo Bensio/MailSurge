@@ -88,6 +88,50 @@ Vercel will automatically redeploy with the new environment variables.
 
 ## Troubleshooting
 
+### Deployment Protection Warning
+
+If you see a warning about "Vercel Deployment Protection might block syncing":
+
+1. **Check if Deployment Protection is enabled in Vercel:**
+   - Go to your Vercel project → Settings → Deployment Protection
+   - If it's enabled, you'll need to get the deployment protection key
+
+2. **Get the Deployment Protection Key:**
+   - In Vercel: Project Settings → Deployment Protection
+   - Copy the "Deployment Protection Key" (it's a long string)
+   - Paste it into the "Deployment protection key" field in Inngest's Vercel integration settings
+
+3. **Alternative: Disable Deployment Protection (not recommended for production)**
+   - Only do this if you don't need deployment protection
+   - Go to Vercel → Settings → Deployment Protection → Disable
+
+4. **Save the configuration in Inngest:**
+   - Click "Save configuration" button in Inngest's Vercel integration page
+
+### "We could not reach your URL" Error
+
+If Inngest shows "We could not reach your URL":
+
+1. **Use Production URL, Not Preview URL:**
+   - Preview URLs (with hash like `mail-surge-8soz0nyhu-...`) are temporary
+   - Use your production URL: `https://mail-surge.vercel.app/api/inngest`
+   - Or your custom domain if you have one
+
+2. **Test the Endpoint Manually:**
+   - Open `https://your-production-url.vercel.app/api/inngest` in a browser
+   - You should see a response (even an error means it's reachable)
+   - If you get "404" or "Cannot GET", the endpoint isn't deployed
+
+3. **Check Vercel Deployment:**
+   - Go to Vercel → Deployments
+   - Make sure your latest deployment is successful
+   - Check if `/api/inngest` is in the deployment
+
+4. **Update Inngest App URL:**
+   - In Inngest: Settings → App URL
+   - Make sure it's set to your **production** URL, not preview
+   - Format: `https://your-production-domain.vercel.app/api/inngest`
+
 ### Emails not sending
 
 1. Check Inngest dashboard for function executions
