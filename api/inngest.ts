@@ -156,10 +156,30 @@ export const sendCampaignEmails = inngest.createFunction(
     console.log('[Inngest Function] User found:', user.email);
 
     // Set up OAuth client
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    
+    if (!clientId || !clientSecret || !redirectUri) {
+      console.error('[Inngest Function] Missing Google OAuth credentials:', {
+        hasClientId: !!clientId,
+        hasClientSecret: !!clientSecret,
+        hasRedirectUri: !!redirectUri,
+      });
+      throw new Error('Missing Google OAuth credentials in environment variables');
+    }
+    
+    console.log('[Inngest Function] OAuth client config:', {
+      hasClientId: !!clientId,
+      clientIdPrefix: clientId.substring(0, 20) + '...',
+      hasClientSecret: !!clientSecret,
+      redirectUri: redirectUri,
+    });
+    
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      clientId,
+      clientSecret,
+      redirectUri
     );
 
     oauth2Client.setCredentials({
