@@ -304,6 +304,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('[Inngest] Timestamp:', new Date().toISOString());
   console.log('[Inngest] User-Agent:', req.headers['user-agent']);
   console.log('[Inngest] This is a function execution request:', req.method === 'POST' && req.url?.includes('/fn/'));
+  console.log('[Inngest] Bypass token in query:', req.query['x-vercel-protection-bypass'] ? 'YES' : 'NO');
+  console.log('[Inngest] Bypass token in headers:', req.headers['x-vercel-protection-bypass'] ? 'YES' : 'NO');
   
   try {
     // Read the raw body from the request stream
