@@ -253,9 +253,15 @@ export const sendCampaignEmails = inngest.createFunction(
 
 // Vercel serverless function handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Log immediately - this should always appear
+  console.log('[Inngest] ===== FUNCTION CALLED =====');
+  console.log('[Inngest] Method:', req.method);
+  console.log('[Inngest] URL:', req.url);
+  console.log('[Inngest] Timestamp:', new Date().toISOString());
+  
   try {
     // Log request for debugging
-    console.log('[Inngest] Request:', {
+    console.log('[Inngest] Request details:', {
       method: req.method,
       url: req.url,
       headers: {
@@ -273,6 +279,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       isSet: signingKeySet,
       length: signingKeyLength,
       prefix: signingKeyPrefix + '...',
+    });
+    
+    // Also log event key
+    const eventKeySet = !!process.env.INNGEST_EVENT_KEY;
+    console.log('[Inngest] Event key check:', {
+      isSet: eventKeySet,
     });
 
     // Get the base URL from environment or headers
