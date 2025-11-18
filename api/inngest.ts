@@ -424,11 +424,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           url = new URL(servePath, baseUrl);
         }
 
+        // Parse the body for Inngest's internal validation
+        // Signature validation uses headers, not the body string
+        let bodyObject: any = null;
+        if (bodyString) {
+          try {
+            bodyObject = JSON.parse(bodyString);
+          } catch (e) {
+            // If parsing fails, use empty object
+            bodyObject = {};
+          }
+        }
+        
         return {
-          // For signature validation, Inngest needs the raw body string
-          // But it also needs to parse it as an object for processing
-          // The InngestCommHandler should handle this, but we provide the raw string
-          body: () => Promise.resolve(bodyString),
+          // Inngest expects the body as an object for validation
+          // Signature validation is done using headers, not the body string
+          body: () => Promise.resolve(bodyObject || bodyString),
           headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
           method: () => Promise.resolve(req.method || 'GET'),
           url: () => Promise.resolve(url),
