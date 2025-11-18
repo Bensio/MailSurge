@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { ContactsUploadSchema } from '../../src/lib/validations';
+import { ContactsUploadSchema } from '../lib/validations';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

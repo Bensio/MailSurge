@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { CreateCampaignSchema } from '../../src/lib/validations';
+import { CreateCampaignSchema } from '../lib/validations';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
