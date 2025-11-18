@@ -1,0 +1,300 @@
+import { Inngest, InngestCommHandler } from 'inngest';
+import { createClient } from '@supabase/supabase-js';
+import { google } from 'googleapis';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+// Initialize Inngest client for the serve endpoint
+const inngest = new Inngest({ 
+  id: 'mailsurge',
+  name: 'MailSurge',
+});
+
+// Import the send email function
+async function sendEmail(
+  contact: { email: string; company: string; id: string },
+  campaign: {
+    subject: string;
+    body_html: string;
+    body_text: string;
+    settings: { delay?: number; ccEmail?: string | null };
+  },
+  oauth2Client: any,
+  senderEmail: string
+) {
+  // Personalize email
+  let html = campaign.body_html;
+  let subject = campaign.subject;
+
+  // Replace {{company}} with actual company name
+  html = html.replace(/\{\{company\}\}/g, contact.company);
+  subject = subject.replace(/\{\{company\}\}/g, contact.company);
+
+  // Create email
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  // Create email with proper headers
+  const emailLines = [
+    `From: ${senderEmail}`,
+    `To: ${contact.email}`,
+  ];
+  
+  if (campaign.settings.ccEmail) {
+    emailLines.push(`Cc: ${campaign.settings.ccEmail}`);
+  }
+  
+  emailLines.push(
+    `Subject: ${subject}`,
+    'Content-Type: text/html; charset=utf-8',
+    'MIME-Version: 1.0',
+    '',
+    html
+  );
+
+  const email = emailLines.join('\r\n');
+
+  // Encode to base64url format (Gmail API requirement)
+  const encodedEmail = Buffer.from(email)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: encodedEmail,
+    },
+  });
+}
+
+// Define the email sending function
+export const sendCampaignEmails = inngest.createFunction(
+  { 
+    id: 'send-campaign-emails',
+    name: 'Send Campaign Emails',
+    retries: 3, // Retry up to 3 times on failure
+  },
+  { event: 'campaign/send' },
+  async ({ event, step }) => {
+    const { campaignId, userId, accessToken, refreshToken } = event.data;
+
+    console.log('[Inngest] Starting email sending for campaign:', campaignId);
+
+    // Initialize Supabase
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // Get campaign and contacts
+    const { data: campaign } = await step.run('get-campaign', async () => {
+      const { data, error } = await supabase
+        .from('campaigns')
+        .select(`
+          *,
+          contacts (*)
+        `)
+        .eq('id', campaignId)
+        .eq('user_id', userId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    });
+
+    if (!campaign) {
+      throw new Error('Campaign not found');
+    }
+
+    // Get user for email fallback
+    const { data: { user } } = await supabase.auth.admin.getUserById(userId);
+
+    // Set up OAuth client
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+
+    oauth2Client.setCredentials({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    // Set up token refresh handler
+    oauth2Client.on('tokens', async (tokens) => {
+      if (tokens.refresh_token) {
+        await supabase.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            ...user?.user_metadata,
+            gmail_token: tokens.access_token,
+            gmail_refresh_token: tokens.refresh_token,
+            gmail_token_expiry: tokens.expiry_date,
+          },
+        });
+      } else if (tokens.access_token) {
+        await supabase.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            ...user?.user_metadata,
+            gmail_token: tokens.access_token,
+            gmail_token_expiry: tokens.expiry_date,
+          },
+        });
+      }
+    });
+
+    // Get sender email
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const senderEmail = await step.run('get-sender-email', async () => {
+      try {
+        const profile = await gmail.users.getProfile({ userId: 'me' });
+        return profile.data.emailAddress || user?.email || '';
+      } catch (error) {
+        console.error('Error getting Gmail profile:', error);
+        return user?.email || '';
+      }
+    });
+
+    // Filter contacts to send
+    const contacts = (campaign.contacts || []).filter(
+      (c: { status: string }) => c.status === 'pending' || c.status === 'failed'
+    );
+
+    if (contacts.length === 0) {
+      await supabase
+        .from('campaigns')
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      return { message: 'No contacts to send' };
+    }
+
+    const delay = (campaign.settings?.delay || 45) * 1000;
+    let sentCount = 0;
+    let failedCount = 0;
+
+    // Send emails one by one with delay
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+      
+      await step.run(`send-email-${i}`, async () => {
+        try {
+          // Update to queued
+          await supabase
+            .from('contacts')
+            .update({ status: 'queued' })
+            .eq('id', contact.id);
+
+          // Send email
+          await sendEmail(contact, campaign, oauth2Client, senderEmail);
+
+          // Update to sent
+          await supabase
+            .from('contacts')
+            .update({
+              status: 'sent',
+              sent_at: new Date().toISOString(),
+            })
+            .eq('id', contact.id);
+
+          sentCount++;
+          console.log(`[Inngest] Sent email ${i + 1}/${contacts.length} to ${contact.email}`);
+
+          // Wait before next email (except for the last one)
+          if (i < contacts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (error) {
+          console.error(`[Inngest] Error sending to ${contact.email}:`, error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          await supabase
+            .from('contacts')
+            .update({
+              status: 'failed',
+              error: errorMessage,
+            })
+            .eq('id', contact.id);
+
+          failedCount++;
+        }
+      });
+    }
+
+    // Update campaign status
+    await step.run('update-campaign-status', async () => {
+      const { data: allContacts } = await supabase
+        .from('contacts')
+        .select('status')
+        .eq('campaign_id', campaignId);
+      
+      const allSent = allContacts?.every((c) => c.status === 'sent') || false;
+      const allFailed = allContacts?.every((c) => c.status === 'failed') || false;
+      const finalStatus = allFailed ? 'failed' : (allSent ? 'completed' : 'completed');
+      
+      await supabase
+        .from('campaigns')
+        .update({
+          status: finalStatus,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', campaignId);
+
+      return { sentCount, failedCount, finalStatus };
+    });
+
+    return { 
+      message: 'Campaign sending completed',
+      sentCount,
+      failedCount,
+      total: contacts.length
+    };
+  }
+);
+
+// Vercel serverless function handler
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Inngest serve function for Vercel
+  const serveHandler = new InngestCommHandler({
+    client: inngest,
+    functions: [sendCampaignEmails],
+    signingKey: process.env.INNGEST_SIGNING_KEY,
+    frameworkName: 'vercel',
+    handler: (req: VercelRequest) => {
+      // Extract body, headers, and method from Vercel request
+      const body = req.body ? JSON.stringify(req.body) : '';
+      const headers: Record<string, string> = {};
+      Object.keys(req.headers).forEach(key => {
+        const value = req.headers[key];
+        if (typeof value === 'string') {
+          headers[key] = value;
+        } else if (Array.isArray(value) && value[0]) {
+          headers[key] = value[0];
+        }
+      });
+
+      const url = new URL(req.url || '/', `https://${req.headers.host || 'localhost'}`);
+
+      return {
+        body: () => Promise.resolve(body),
+        headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
+        method: () => Promise.resolve(req.method || 'GET'),
+        url: () => Promise.resolve(url),
+        query: () => Promise.resolve(req.query || {}),
+        transformResponse: ({ body, status, headers: responseHeaders }) => {
+          // Set status and headers on Vercel response
+          res.status(status);
+          Object.entries(responseHeaders || {}).forEach(([key, value]) => {
+            res.setHeader(key, value);
+          });
+          res.send(body);
+          return res;
+        },
+      };
+    },
+  });
+
+  // Create a handler function that matches Vercel's request/response pattern
+  const handlerFn = serveHandler.createHandler();
+  return handlerFn(req);
+}
+
