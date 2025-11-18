@@ -60,6 +60,7 @@ export function getGmailAuthUrl(): string {
   }
 
   // Log the redirect URI being used (for debugging)
+  console.log('[Gmail Auth] Client ID being used:', clientId);
   console.log('[Gmail Auth] Redirect URI being used:', redirectUri);
   console.log('[Gmail Auth] VITE_GOOGLE_REDIRECT_URI env var:', import.meta.env.VITE_GOOGLE_REDIRECT_URI);
 
