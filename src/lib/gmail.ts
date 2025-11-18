@@ -59,6 +59,10 @@ export function getGmailAuthUrl(): string {
     throw new Error('VITE_GOOGLE_CLIENT_ID is not set');
   }
 
+  // Log the redirect URI being used (for debugging)
+  console.log('[Gmail Auth] Redirect URI being used:', redirectUri);
+  console.log('[Gmail Auth] VITE_GOOGLE_REDIRECT_URI env var:', import.meta.env.VITE_GOOGLE_REDIRECT_URI);
+
   const scopes = [
     'https://www.googleapis.com/auth/gmail.send',
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -73,6 +77,9 @@ export function getGmailAuthUrl(): string {
     prompt: 'consent',
   });
 
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  console.log('[Gmail Auth] Full OAuth URL (without state):', authUrl.substring(0, 200) + '...');
+  
+  return authUrl;
 }
 
