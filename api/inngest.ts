@@ -379,18 +379,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Create a handler function that matches Vercel's request/response pattern
     const handlerFn = serveHandler.createHandler();
+    
+    // For PUT requests (sync), log more details
+    if (req.method === 'PUT') {
+      console.log('[Inngest] PUT request detected - this is a sync request');
+      console.log('[Inngest] Request body type:', typeof req.body);
+      console.log('[Inngest] Content-Type header:', req.headers['content-type']);
+      console.log('[Inngest] Has signing key:', !!process.env.INNGEST_SIGNING_KEY);
+    }
+    
     const result = await handlerFn(req);
     console.log('[Inngest] Response sent successfully');
     return result;
   } catch (error) {
-    console.error('[Inngest] Handler error:', error);
+    console.error('[Inngest] ===== ERROR OCCURRED =====');
+    console.error('[Inngest] Error type:', error instanceof Error ? error.constructor.name : typeof error);
     console.error('[Inngest] Error message:', error instanceof Error ? error.message : 'Unknown error');
     console.error('[Inngest] Error stack:', error instanceof Error ? error.stack : 'No stack');
     
     // Check if it's an authentication error
-    if (error instanceof Error && (error.message.includes('signature') || error.message.includes('authentication'))) {
-      console.error('[Inngest] Authentication error detected - check signing key match');
-      console.error('[Inngest] Signing key prefix:', process.env.INNGEST_SIGNING_KEY?.substring(0, 20) || 'NOT_SET');
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('signature') || errorMessage.includes('authentication') || errorMessage.includes('signing')) {
+      console.error('[Inngest] ===== AUTHENTICATION ERROR DETECTED =====');
+      console.error('[Inngest] Signing key is set:', !!process.env.INNGEST_SIGNING_KEY);
+      console.error('[Inngest] Signing key length:', process.env.INNGEST_SIGNING_KEY?.length || 0);
+      console.error('[Inngest] Signing key prefix:', process.env.INNGEST_SIGNING_KEY?.substring(0, 30) || 'NOT_SET');
+      console.error('[Inngest] Signing key suffix:', process.env.INNGEST_SIGNING_KEY?.substring(process.env.INNGEST_SIGNING_KEY.length - 10) || 'NOT_SET');
     }
     
     // Return a proper error response so Inngest knows the endpoint exists
