@@ -85,21 +85,31 @@ export const sendCampaignEmails = inngest.createFunction(
       dataKeys: Object.keys(event.data || {}),
     });
     
-    const { campaignId, userId, accessToken, refreshToken } = event.data;
+    try {
+      const { campaignId, userId, accessToken, refreshToken } = event.data;
 
-    console.log('[Inngest Function] Starting email sending for campaign:', campaignId);
-    console.log('[Inngest Function] Event data:', {
-      campaignId,
-      userId,
-      hasAccessToken: !!accessToken,
-      hasRefreshToken: !!refreshToken,
-    });
+      console.log('[Inngest Function] Starting email sending for campaign:', campaignId);
+      console.log('[Inngest Function] Event data:', {
+        campaignId,
+        userId,
+        hasAccessToken: !!accessToken,
+        hasRefreshToken: !!refreshToken,
+      });
 
-    // Initialize Supabase
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
+      // Check environment variables
+      if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+        throw new Error('Missing Supabase environment variables');
+      }
+
+      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
+        throw new Error('Missing Google OAuth environment variables');
+      }
+
+      // Initialize Supabase
+      const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_KEY
+      );
 
     // Get campaign and contacts
     const { data: campaign } = await step.run('get-campaign', async () => {
@@ -257,12 +267,21 @@ export const sendCampaignEmails = inngest.createFunction(
       return { sentCount, failedCount, finalStatus };
     });
 
-    return { 
-      message: 'Campaign sending completed',
-      sentCount,
-      failedCount,
-      total: contacts.length
-    };
+      return { 
+        message: 'Campaign sending completed',
+        sentCount,
+        failedCount,
+        total: contacts.length
+      };
+    } catch (error) {
+      console.error('[Inngest Function] Fatal error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Inngest Function] Error details:', {
+        message: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error; // Re-throw to let Inngest handle retries
+    }
   }
 );
 
