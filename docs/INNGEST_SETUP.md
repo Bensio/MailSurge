@@ -45,6 +45,14 @@ INNGEST_SIGNING_KEY=your_signing_key_here
    https://your-custom-domain.com/api/inngest
    ```
 
+**Important**: Make sure to use the full URL including `https://` and the `/api/inngest` path. The URL should NOT end with a trailing slash.
+
+**Optional**: If you want to explicitly set the serve URL, you can add this environment variable in Vercel:
+```
+INNGEST_SERVE_URL=https://your-domain.vercel.app
+```
+Otherwise, the code will automatically use `VERCEL_URL` environment variable.
+
 ### 5. Deploy to Vercel
 
 After adding the environment variables, redeploy your Vercel project:

@@ -253,12 +253,42 @@ export const sendCampaignEmails = inngest.createFunction(
 
 // Vercel serverless function handler
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Get the base URL from environment or headers
+  // Vercel provides VERCEL_URL in production, or we use headers
+  const getBaseUrl = () => {
+    // Check for explicit Inngest serve URL first
+    if (process.env.INNGEST_SERVE_URL) {
+      return process.env.INNGEST_SERVE_URL;
+    }
+    
+    // Use Vercel URL if available
+    if (process.env.VERCEL_URL) {
+      return `https://${process.env.VERCEL_URL}`;
+    }
+    
+    // Try to get from headers
+    const host = req.headers.host || req.headers['x-forwarded-host'];
+    const protocol = req.headers['x-forwarded-proto'] === 'https' || !host?.includes('localhost') ? 'https' : 'http';
+    
+    if (host) {
+      return `${protocol}://${host}`;
+    }
+    
+    // Fallback (shouldn't happen in production)
+    return 'https://localhost:3000';
+  };
+
+  const baseUrl = getBaseUrl();
+  const servePath = '/api/inngest';
+
   // Inngest serve function for Vercel
   const serveHandler = new InngestCommHandler({
     client: inngest,
     functions: [sendCampaignEmails],
     signingKey: process.env.INNGEST_SIGNING_KEY,
     frameworkName: 'vercel',
+    serveHost: baseUrl,
+    servePath: servePath,
     handler: (req: VercelRequest) => {
       // Extract body, headers, and method from Vercel request
       const body = req.body ? JSON.stringify(req.body) : '';
@@ -272,14 +302,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       });
 
-      const url = new URL(req.url || '/', `https://${req.headers.host || 'localhost'}`);
+      // Construct proper URL for Inngest
+      const path = req.url || servePath;
+      const url = new URL(path, baseUrl);
 
       return {
         body: () => Promise.resolve(body),
         headers: (key: string) => Promise.resolve(headers[key.toLowerCase()] || null),
         method: () => Promise.resolve(req.method || 'GET'),
         url: () => Promise.resolve(url),
-        query: () => Promise.resolve(req.query || {}),
+        queryString: (key: string, urlObj: URL) => {
+          return Promise.resolve(urlObj.searchParams.get(key));
+        },
         transformResponse: ({ body, status, headers: responseHeaders }) => {
           // Set status and headers on Vercel response
           res.status(status);
