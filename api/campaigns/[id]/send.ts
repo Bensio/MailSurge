@@ -71,6 +71,17 @@ async function sleep(ms: number) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Content-Type', 'application/json');
+
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -82,6 +93,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // Check environment variables
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
+      console.error('Missing Google OAuth environment variables');
+      return res.status(500).json({ error: 'Gmail OAuth not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in Vercel environment variables.' });
+    }
+
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+      console.error('Missing Supabase environment variables');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
     // Get user and verify ownership
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -90,6 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.error('Auth error:', authError);
       return res.status(401).json({ error: 'Invalid token' });
     }
 
@@ -112,7 +135,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const accessToken = user.user_metadata?.gmail_token;
     const refreshToken = user.user_metadata?.gmail_refresh_token;
     
+    console.log('[API] Gmail token check:', {
+      hasAccessToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
+      userMetadataKeys: Object.keys(user.user_metadata || {}),
+    });
+    
     if (!accessToken || !refreshToken) {
+      console.error('[API] Gmail tokens missing');
       return res.status(400).json({ error: 'Gmail not connected. Please connect your Gmail account in settings.' });
     }
 
@@ -126,12 +156,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ status: 'started', total: campaign.contacts?.length || 0 });
 
     // Send emails in background (fire and forget)
+    // NOTE: Vercel serverless functions have time limits (10s free, 60s pro)
+    // For large campaigns, consider using a queue system
     void (async () => {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
+      try {
+        console.log('[API] Starting background email sending for campaign:', id);
+        
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_REDIRECT_URI
+        );
+        
+        if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+          throw new Error('Google OAuth credentials not configured');
+        }
 
     // Set up token refresh handler
     oauth2Client.on('tokens', async (tokens) => {
@@ -202,7 +241,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[API] Sending to ${contactsToSend.length} contacts (${contacts.length - contactsToSend.length} already sent)`);
     console.log(`[API] Sender email: ${senderEmail}`);
 
-    for (const contact of contactsToSend) {
+    for (let i = 0; i < contactsToSend.length; i++) {
+      const contact = contactsToSend[i];
+      console.log(`[API] Sending email ${i + 1}/${contactsToSend.length} to ${contact.email}`);
 
       try {
         // Update to queued
@@ -213,6 +254,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         await sendEmail(contact, campaign, oauth2Client, senderEmail);
 
+        console.log(`[API] Successfully sent email to ${contact.email}`);
+
         // Update contact status
         await supabase
           .from('contacts')
@@ -222,12 +265,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })
           .eq('id', contact.id);
 
-        // Wait before next email
-        await sleep(delay);
+        // Wait before next email (except for the last one)
+        if (i < contactsToSend.length - 1) {
+          await sleep(delay);
+        }
       } catch (error: unknown) {
-        console.error('Send error:', error);
-
+        console.error(`[API] Error sending to ${contact.email}:`, error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[API] Error details:`, error instanceof Error ? error.stack : 'No stack');
 
         await supabase
           .from('contacts')
@@ -238,6 +283,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('id', contact.id);
       }
     }
+    
+    console.log(`[API] Finished sending emails for campaign ${id}`);
 
       // Check if all contacts (including previously sent) are now sent
       const { data: allContacts } = await supabase
@@ -257,8 +304,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           completed_at: new Date().toISOString(),
         })
         .eq('id', id);
+      } catch (bgError) {
+        console.error('[API] Background email sending error:', bgError);
+        const errorMessage = bgError instanceof Error ? bgError.message : 'Unknown error';
+        console.error('[API] Error stack:', bgError instanceof Error ? bgError.stack : 'No stack');
+        
+        // Update campaign status to failed
+        try {
+          await supabase
+            .from('campaigns')
+            .update({ 
+              status: 'failed',
+              completed_at: new Date().toISOString()
+            })
+            .eq('id', id);
+        } catch (updateError) {
+          console.error('[API] Failed to update campaign status:', updateError);
+        }
+      }
     })().catch((error) => {
-      console.error('Background email sending error:', error);
+      console.error('[API] Unhandled error in background task:', error);
     });
 
     return;
