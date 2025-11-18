@@ -252,6 +252,7 @@ export const sendCampaignEmails = inngest.createFunction(
 );
 
 // Vercel serverless function handler
+// Note: Vercel automatically parses JSON bodies, but we need raw body for signature validation
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Log immediately - this should always appear
   console.log('[Inngest] ===== FUNCTION CALLED =====');
@@ -260,6 +261,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('[Inngest] Timestamp:', new Date().toISOString());
   
   try {
+    // For PUT requests, we need to preserve the raw body for signature validation
+    // Vercel parses JSON automatically, but Inngest needs the exact raw string
+    // The issue: Vercel doesn't expose raw body easily, so we need to work around it
+    let rawBodyString: string | undefined;
+    
+    if (req.method === 'PUT') {
+      // Try to get raw body - Vercel might store it somewhere
+      const vercelReq = req as any;
+      rawBodyString = vercelReq.rawBody || vercelReq.bodyRaw;
+      
+      // If not available, we'll need to reconstruct from parsed body
+      // This is not ideal but might work if JSON.stringify produces the same format
+      if (!rawBodyString && req.body) {
+        if (typeof req.body === 'string') {
+          rawBodyString = req.body;
+        } else {
+          // Stringify with no spaces to match typical JSON format
+          rawBodyString = JSON.stringify(req.body);
+          console.log('[Inngest] WARNING: Reconstructing body from parsed object - signature may fail if format differs');
+        }
+      }
+    }
     // Log request for debugging
     console.log('[Inngest] Request details:', {
       method: req.method,
@@ -325,15 +348,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       servePath: servePath,
       handler: (req: VercelRequest) => {
         // Extract body, headers, and method from Vercel request
-        // Vercel automatically parses JSON bodies, but we need to stringify for Inngest
+        // IMPORTANT: For signature validation, we need the RAW body string, not the parsed object
+        // Vercel automatically parses JSON, but Inngest needs the raw string for signature verification
         let body = '';
-        if (req.body) {
+        if (req.method === 'PUT' && rawBodyString) {
+          // Use the raw body string we captured earlier
+          body = rawBodyString;
+          console.log('[Inngest] Using raw body string for PUT request');
+        } else if (req.body) {
           if (typeof req.body === 'string') {
             body = req.body;
           } else {
             // If it's already parsed (object), stringify it
+            // Note: This may break signature validation for PUT requests
             body = JSON.stringify(req.body);
+            if (req.method === 'PUT') {
+              console.log('[Inngest] WARNING: Using stringified parsed body - signature may fail');
+            }
           }
+        }
+        
+        // Log body info for PUT requests
+        if (req.method === 'PUT') {
+          console.log('[Inngest] Body extraction:', {
+            hasBody: !!req.body,
+            bodyType: typeof req.body,
+            bodyLength: body.length,
+            hasRawBody: !!rawBodyString,
+            bodyPreview: body.substring(0, 100),
+          });
         }
         
         const headers: Record<string, string> = {};
@@ -372,6 +415,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               bodyType: typeof body,
               headersCount: Object.keys(responseHeaders || {}).length,
             });
+            
+            // Log error response body for debugging
+            if (status >= 400 && body) {
+              try {
+                const errorBody = typeof body === 'string' ? JSON.parse(body) : body;
+                console.log('[Inngest] Error response body:', errorBody);
+              } catch (e) {
+                console.log('[Inngest] Error response body (raw):', body?.substring(0, 500));
+              }
+            }
+            
             res.status(status);
             Object.entries(responseHeaders || {}).forEach(([key, value]) => {
               res.setHeader(key, value);
