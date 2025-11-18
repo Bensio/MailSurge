@@ -366,6 +366,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
           transformResponse: ({ body, status, headers: responseHeaders }) => {
             // Set status and headers on Vercel response
+            console.log('[Inngest] Transform response:', {
+              status,
+              bodyLength: body?.length || 0,
+              bodyType: typeof body,
+              headersCount: Object.keys(responseHeaders || {}).length,
+            });
             res.status(status);
             Object.entries(responseHeaders || {}).forEach(([key, value]) => {
               res.setHeader(key, value);
@@ -389,6 +395,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     
     const result = await handlerFn(req);
+    console.log('[Inngest] Handler result:', {
+      resultType: typeof result,
+      hasStatus: 'status' in (result || {}),
+    });
     console.log('[Inngest] Response sent successfully');
     return result;
   } catch (error) {
