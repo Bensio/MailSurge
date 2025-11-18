@@ -8,10 +8,13 @@ const supabase = createClient(
 );
 
 // Initialize Inngest client for sending events
+// IMPORTANT: This client needs the eventKey to send events to Inngest Cloud
 const inngest = new Inngest({ 
   id: 'mailsurge',
   name: 'MailSurge',
   eventKey: process.env.INNGEST_EVENT_KEY,
+  // Inngest Cloud endpoint (defaults to https://api.inngest.com)
+  // No need to specify if using default
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
