@@ -306,7 +306,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('id', id);
       } catch (bgError) {
         console.error('[API] Background email sending error:', bgError);
-        const errorMessage = bgError instanceof Error ? bgError.message : 'Unknown error';
+        console.error('[API] Error message:', bgError instanceof Error ? bgError.message : 'Unknown error');
         console.error('[API] Error stack:', bgError instanceof Error ? bgError.stack : 'No stack');
         
         // Update campaign status to failed
