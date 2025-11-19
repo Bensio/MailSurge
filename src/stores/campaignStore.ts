@@ -54,7 +54,12 @@ export const useCampaignStore = create<CampaignState>((set) => ({
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns/${id}`, { headers });
-      if (!response.ok) throw new Error('Failed to fetch campaign');
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('NOT_FOUND');
+        }
+        throw new Error('Failed to fetch campaign');
+      }
       const campaign = await response.json();
       set({ currentCampaign: campaign, loading: false });
     } catch (error) {

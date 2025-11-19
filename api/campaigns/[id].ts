@@ -54,6 +54,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (campaignError) {
         console.error('Campaign fetch error:', campaignError);
+        // Check if it's a "not found" error (PGRST116) or row-level security issue
+        if (campaignError.code === 'PGRST116' || campaignError.message?.includes('No rows')) {
+          return res.status(404).json({ error: 'Campaign not found' });
+        }
         return res.status(404).json({ error: 'Campaign not found', details: campaignError.message });
       }
 

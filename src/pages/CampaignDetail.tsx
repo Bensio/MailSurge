@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive } from 'lucide-react';
+import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw } from 'lucide-react';
 import { formatDate, validateEmail } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
@@ -33,12 +33,45 @@ export function CampaignDetail() {
   const [libraryContacts, setLibraryContacts] = useState<Contact[]>([]);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     if (id) {
       fetchCampaign(id);
     }
   }, [id, fetchCampaign]);
+
+  // Auto-refresh campaign status when sending
+  useEffect(() => {
+    if (!id || !currentCampaign) return;
+
+    // Only poll if campaign is actively sending
+    const isSending = currentCampaign.status === 'sending' || 
+                      (currentCampaign.contacts || []).some((c: Contact) => 
+                        c.status === 'queued' || c.status === 'pending'
+                      );
+
+    if (!isSending) {
+      setIsRefreshing(false);
+      return;
+    }
+
+    setIsRefreshing(true);
+
+    // Poll every 3 seconds while sending
+    const interval = setInterval(() => {
+      if (id) {
+        fetchCampaign(id).catch((err) => {
+          logger.error('Error refreshing campaign:', err);
+        });
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      setIsRefreshing(false);
+    };
+  }, [id, currentCampaign?.status, currentCampaign?.contacts, fetchCampaign]);
 
   // Fetch library contacts when "Add from Library" is opened
   useEffect(() => {
@@ -164,13 +197,11 @@ export function CampaignDetail() {
     try {
       await sendCampaign(id);
       const delay = currentCampaign?.settings?.delay || 45;
-      alert(`Campaign sending started! Emails will be sent to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} with a ${delay} second delay between each.`);
-      // Refresh campaign data after a short delay
-      setTimeout(() => {
-        if (id) {
-          fetchCampaign(id);
-        }
-      }, 1000);
+      // Refresh immediately to get updated status
+      if (id) {
+        await fetchCampaign(id);
+      }
+      alert(`Campaign sending started! Emails will be sent to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} with a ${delay} second delay between each. The page will auto-refresh to show progress.`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send campaign';
       alert(`Error: ${errorMessage}`);
@@ -350,6 +381,19 @@ export function CampaignDetail() {
   }
 
   if (error || !currentCampaign) {
+    // If 404 error, redirect to campaigns list after a short delay
+    if (error === 'NOT_FOUND' || error?.includes('not found')) {
+      setTimeout(() => {
+        navigate('/campaigns');
+      }, 2000);
+      return (
+        <div className="flex flex-col items-center justify-center h-64 space-y-4">
+          <div className="text-destructive">Campaign not found</div>
+          <div className="text-sm text-muted-foreground">Redirecting to campaigns list...</div>
+        </div>
+      );
+    }
+    
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-destructive">Error: {error || 'Campaign not found'}</div>
@@ -391,6 +435,12 @@ export function CampaignDetail() {
         </div>
         <div className="flex items-center gap-2">
           <Badge>{currentCampaign.status}</Badge>
+          {isRefreshing && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span>Updating...</span>
+            </div>
+          )}
           {canSend && (
             <Button onClick={handleSend} disabled={loading}>
               <Send className="mr-2 h-4 w-4" />
