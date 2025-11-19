@@ -75,7 +75,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Failed to get access token' });
     }
 
-    // Store tokens in user metadata
+    // Fetch Gmail profile to get the email address
+    console.log('[OAuth Callback] Fetching Gmail profile...');
+    oauth2Client.setCredentials({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+    });
+    
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    let gmailEmail = '';
+    try {
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      gmailEmail = profile.data.emailAddress || '';
+      console.log('[OAuth Callback] Gmail email fetched:', gmailEmail);
+    } catch (error) {
+      console.error('[OAuth Callback] Error fetching Gmail profile:', error);
+      // Continue anyway - we can try to get it later
+    }
+
+    // Store tokens and email in user metadata
     console.log('[OAuth Callback] Storing tokens in user metadata...');
     const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
       user_metadata: {
@@ -83,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         gmail_token: tokens.access_token,
         gmail_refresh_token: tokens.refresh_token,
         gmail_token_expiry: tokens.expiry_date,
+        gmail_email: gmailEmail || user.user_metadata?.gmail_email || '', // Store email if we got it
       },
     });
 
