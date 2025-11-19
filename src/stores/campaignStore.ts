@@ -56,15 +56,33 @@ export const useCampaignStore = create<CampaignState>((set) => ({
       const response = await fetch(`${API_BASE}/campaigns/${id}`, { headers });
       if (!response.ok) {
         if (response.status === 404) {
+          // Clear current campaign if it was set
+          set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
           throw new Error('NOT_FOUND');
         }
-        throw new Error('Failed to fetch campaign');
+        // Try to parse error message from response
+        let errorMessage = 'Failed to fetch campaign';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // If response isn't JSON, use status text
+          errorMessage = `${response.status}: ${response.statusText}`;
+        }
+        set({ loading: false, error: errorMessage });
+        throw new Error(errorMessage);
       }
       const campaign = await response.json();
-      set({ currentCampaign: campaign, loading: false });
+      set({ currentCampaign: campaign, loading: false, error: null });
     } catch (error) {
+      // Only set error if it's not already set
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ error: errorMessage, loading: false });
+      if (errorMessage === 'NOT_FOUND') {
+        set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
+      } else {
+        set({ loading: false, error: errorMessage });
+      }
+      throw error; // Re-throw so callers can handle it
     }
   },
 

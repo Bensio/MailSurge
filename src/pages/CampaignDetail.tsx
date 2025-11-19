@@ -43,35 +43,39 @@ export function CampaignDetail() {
 
   // Auto-refresh campaign status when sending
   useEffect(() => {
-    if (!id || !currentCampaign) return;
+    if (!id || !currentCampaign) {
+      setIsRefreshing(false);
+      return;
+    }
 
-    // Only poll if campaign is actively sending
-    const isSending = currentCampaign.status === 'sending' || 
-                      (currentCampaign.contacts || []).some((c: Contact) => 
-                        c.status === 'queued' || c.status === 'pending'
-                      );
-
-    if (!isSending) {
+    // Only poll if campaign status is explicitly "sending"
+    // Don't poll for draft, completed, failed, or paused campaigns
+    if (currentCampaign.status !== 'sending') {
       setIsRefreshing(false);
       return;
     }
 
     setIsRefreshing(true);
 
-    // Poll every 3 seconds while sending
+    // Poll every 5 seconds while sending (less aggressive)
     const interval = setInterval(() => {
       if (id) {
         fetchCampaign(id).catch((err) => {
           logger.error('Error refreshing campaign:', err);
+          // If we get a 404, stop polling
+          if (err instanceof Error && err.message === 'NOT_FOUND') {
+            setIsRefreshing(false);
+            clearInterval(interval);
+          }
         });
       }
-    }, 3000);
+    }, 5000);
 
     return () => {
       clearInterval(interval);
       setIsRefreshing(false);
     };
-  }, [id, currentCampaign?.status, currentCampaign?.contacts, fetchCampaign]);
+  }, [id, currentCampaign?.status, fetchCampaign]);
 
   // Fetch library contacts when "Add from Library" is opened
   useEffect(() => {
@@ -380,12 +384,20 @@ export function CampaignDetail() {
     );
   }
 
-  if (error || !currentCampaign) {
-    // If 404 error, redirect to campaigns list after a short delay
-    if (error === 'NOT_FOUND' || error?.includes('not found')) {
-      setTimeout(() => {
+  // Handle 404 redirect
+  useEffect(() => {
+    if (error === 'NOT_FOUND' || (error && error.includes('NOT_FOUND'))) {
+      const timer = setTimeout(() => {
         navigate('/campaigns');
       }, 2000);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [error, navigate]);
+
+  if (error || !currentCampaign) {
+    // If 404 error, show redirect message
+    if (error === 'NOT_FOUND' || (error && (error.includes('NOT_FOUND') || error.includes('not found')))) {
       return (
         <div className="flex flex-col items-center justify-center h-64 space-y-4">
           <div className="text-destructive">Campaign not found</div>
