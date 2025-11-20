@@ -28,6 +28,12 @@ export function NewCampaign() {
       ccEmail: '',
     },
   });
+  const [delayInputValue, setDelayInputValue] = useState<string>('45');
+
+  // Sync delayInputValue with formData when formData changes externally
+  useEffect(() => {
+    setDelayInputValue(String(formData.settings.delay || 45));
+  }, [formData.settings.delay]);
   // Design state for future use (saving/loading designs)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_design, setDesign] = useState<unknown>(null);
@@ -91,11 +97,13 @@ export function NewCampaign() {
       if (parent === 'settings') {
         setFormData((prev) => {
           if (child === 'delay') {
+            // Ensure delay is always a number
+            const delayValue = typeof value === 'number' ? value : (typeof value === 'string' ? parseInt(value, 10) : prev.settings.delay);
             return {
               ...prev,
               settings: {
                 ...prev.settings,
-                delay: typeof value === 'number' ? value : prev.settings.delay,
+                delay: isNaN(delayValue) ? prev.settings.delay : delayValue,
                 ccEmail: prev.settings.ccEmail,
               },
             };
@@ -217,7 +225,7 @@ export function NewCampaign() {
 
       // Clean up settings - convert empty string to null for ccEmail
       const cleanedSettings = {
-        delay: Math.max(30, formData.settings?.delay || 45), // Ensure delay is at least 30
+        delay: Math.max(1, Math.min(300, formData.settings?.delay || 45)), // Ensure delay is between 1 and 300
         ccEmail: formData.settings?.ccEmail === '' ? null : formData.settings?.ccEmail || null,
       };
 
@@ -345,35 +353,39 @@ export function NewCampaign() {
             <Input
               id="delay"
               type="number"
-              min="30"
+              min="1"
               max="300"
-              value={formData.settings.delay}
+              value={delayInputValue}
               onChange={(e) => {
-                const delayValue = parseInt(e.target.value, 10);
-                // Allow typing any number, only validate on blur
-                if (!isNaN(delayValue)) {
-                  handleInputChange('settings.delay', delayValue);
-                } else if (e.target.value === '') {
-                  // Allow empty input while typing
-                  handleInputChange('settings.delay', 45);
-                }
+                // Allow free typing - just update the input value
+                setDelayInputValue(e.target.value);
               }}
               onBlur={(e) => {
-                // Clamp value when user finishes typing
-                const delayValue = parseInt(e.target.value, 10);
-                if (!isNaN(delayValue)) {
-                  const clampedValue = Math.max(30, Math.min(300, delayValue));
-                  if (clampedValue !== delayValue) {
-                    handleInputChange('settings.delay', clampedValue);
-                  }
+                // Validate and update formData when user finishes typing
+                const inputValue = e.target.value.trim();
+                if (inputValue === '') {
+                  // If empty, set to default
+                  const defaultValue = 45;
+                  setDelayInputValue(String(defaultValue));
+                  handleInputChange('settings.delay', defaultValue);
+                  return;
+                }
+                const delayValue = parseInt(inputValue, 10);
+                if (!isNaN(delayValue) && delayValue >= 1) {
+                  // Clamp to valid range (1-300)
+                  const clampedValue = Math.max(1, Math.min(300, delayValue));
+                  setDelayInputValue(String(clampedValue));
+                  handleInputChange('settings.delay', clampedValue);
                 } else {
                   // If invalid, reset to default
-                  handleInputChange('settings.delay', 45);
+                  const defaultValue = 45;
+                  setDelayInputValue(String(defaultValue));
+                  handleInputChange('settings.delay', defaultValue);
                 }
               }}
             />
             <p className="text-xs text-muted-foreground">
-              Must be between 30 and 300 seconds
+              Must be between 1 and 300 seconds
             </p>
           </div>
 

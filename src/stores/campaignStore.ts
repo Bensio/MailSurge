@@ -68,10 +68,13 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
           errorMessage = `${response.status}: ${response.statusText}`;
         }
         
-        // Handle 404 specifically
+        // Handle 404 specifically - don't log these as they're expected
         if (response.status === 404 || errorMessage.toLowerCase().includes('not found')) {
           set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
-          throw new Error('NOT_FOUND');
+          const notFoundError = new Error('NOT_FOUND');
+          // Mark as handled so it doesn't get logged
+          (notFoundError as any).isNotFound = true;
+          throw notFoundError;
         }
         
         // Other errors
@@ -86,8 +89,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const currentState = get();
       
+      // Skip logging NOT_FOUND errors - they're handled by redirect
+      const isNotFound = error instanceof Error && (errorMessage === 'NOT_FOUND' || (error as any).isNotFound);
+      
       if (currentState.error === null) {
-        if (errorMessage === 'NOT_FOUND') {
+        if (isNotFound) {
           set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
         } else if (!errorMessage.includes('Failed to fetch campaign')) {
           // Don't overwrite with generic error if we already have a specific one

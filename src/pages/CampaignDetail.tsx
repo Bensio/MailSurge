@@ -43,6 +43,10 @@ export function CampaignDetail() {
         useCampaignStore.setState({ currentCampaign: null, error: null, loading: true });
       }
       fetchCampaign(id).catch((err) => {
+        // Don't log 404 errors - they're handled by the redirect logic
+        if (err instanceof Error && err.message === 'NOT_FOUND') {
+          return;
+        }
         logger.error('Error fetching campaign:', err);
       });
     } else {
@@ -71,12 +75,13 @@ export function CampaignDetail() {
     const interval = setInterval(() => {
       if (id) {
         fetchCampaign(id).catch((err) => {
-          logger.error('Error refreshing campaign:', err);
-          // If we get a 404, stop polling
+          // If we get a 404, stop polling silently (redirect will happen)
           if (err instanceof Error && err.message === 'NOT_FOUND') {
             setIsRefreshing(false);
             clearInterval(interval);
+            return; // Don't log 404 errors during polling
           }
+          logger.error('Error refreshing campaign:', err);
         });
       }
     }, 5000);
@@ -403,12 +408,12 @@ export function CampaignDetail() {
     }
   };
 
-  // Handle 404 redirect
+  // Handle 404 redirect - redirect quickly to avoid showing error
   useEffect(() => {
     if (error === 'NOT_FOUND' || (error && error.includes('NOT_FOUND'))) {
       const timer = setTimeout(() => {
         navigate('/campaigns');
-      }, 2000);
+      }, 500); // Reduced delay to minimize error visibility
       return () => clearTimeout(timer);
     }
     return undefined;
