@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useCampaignStore } from '@/stores/campaignStore';
 import { useAuthStore } from '@/stores/authStore';
 import { CreateCampaignSchema } from '@/lib/validations';
@@ -14,7 +14,9 @@ import { Save } from 'lucide-react';
 
 export function NewCampaign() {
   const navigate = useNavigate();
-  const { createCampaign, loading } = useCampaignStore();
+  const { id } = useParams<{ id?: string }>();
+  const isEditMode = !!id;
+  const { createCampaign, updateCampaign, fetchCampaign, loading } = useCampaignStore();
   const { user, refreshUser } = useAuthStore();
   const [step, setStep] = useState<'details' | 'editor'>('details');
   const [formData, setFormData] = useState({
@@ -34,13 +36,47 @@ export function NewCampaign() {
   useEffect(() => {
     setDelayInputValue(String(formData.settings.delay || 45));
   }, [formData.settings.delay]);
-  // Design state for future use (saving/loading designs)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_design, setDesign] = useState<unknown>(null);
+  const [design, setDesign] = useState<unknown>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const editorRef = useRef<EmailEditorRef>(null);
   const exportedHtmlRef = useRef<{ html: string; text: string } | null>(null);
   const [gmailAccounts, setGmailAccounts] = useState<Array<{ email: string }>>([]);
+  const [loadingCampaign, setLoadingCampaign] = useState(false);
+
+  // Load campaign data if in edit mode
+  useEffect(() => {
+    if (isEditMode && id) {
+      setLoadingCampaign(true);
+      fetchCampaign(id)
+        .then(() => {
+          const campaign = useCampaignStore.getState().currentCampaign;
+          if (campaign) {
+            setFormData({
+              name: campaign.name,
+              subject: campaign.subject,
+              body_html: campaign.body_html,
+              body_text: campaign.body_text,
+              from_email: campaign.from_email || '',
+              settings: {
+                delay: campaign.settings?.delay || 45,
+                ccEmail: campaign.settings?.ccEmail || '',
+              },
+            });
+            setDelayInputValue(String(campaign.settings?.delay || 45));
+            if (campaign.design_json) {
+              setDesign(campaign.design_json);
+            }
+          }
+        })
+        .catch((err) => {
+          logger.error('Error loading campaign for edit:', err);
+          navigate('/campaigns');
+        })
+        .finally(() => {
+          setLoadingCampaign(false);
+        });
+    }
+  }, [isEditMode, id, fetchCampaign, navigate]);
 
   useEffect(() => {
     // Refresh user data on mount to ensure we have latest metadata
@@ -53,8 +89,8 @@ export function NewCampaign() {
         if (store.user?.user_metadata) {
           const accounts = getConnectedGmailAccounts(store.user.user_metadata);
           setGmailAccounts(accounts);
-          // Set default from_email to first account if available
-          if (accounts.length > 0 && !formData.from_email) {
+          // Set default from_email to first account if available and not in edit mode
+          if (accounts.length > 0 && !formData.from_email && !isEditMode) {
             const firstAccount = accounts[0];
             if (firstAccount?.email) {
               setFormData(prev => ({ ...prev, from_email: firstAccount.email }));
@@ -130,11 +166,14 @@ export function NewCampaign() {
   };
 
   const handleSaveDesign = (savedData: unknown) => {
-    setDesign(savedData);
-    
     // Extract HTML and text from the exported data
     if (savedData && typeof savedData === 'object') {
       const data = savedData as { design?: unknown; html?: string };
+      
+      // Store the design JSON for future editing
+      if (data.design) {
+        setDesign(data.design);
+      }
       
       if (data.html) {
         logger.debug('NewCampaign', 'Saving exported HTML', { length: data.html.length });
@@ -253,17 +292,30 @@ export function NewCampaign() {
       const campaignData = {
         ...validation.data,
         settings: validation.data.settings || { delay: 45, ccEmail: null },
+        design_json: design || null, // Include design JSON for visual editing
       };
       
-      logger.debug('NewCampaign', 'Creating campaign', {
-        name: campaignData.name,
-        subject: campaignData.subject,
-        body_html_length: campaignData.body_html?.length,
-      });
-      
-      const campaign = await createCampaign(campaignData);
-      logger.debug('NewCampaign', 'Campaign created', { id: campaign.id });
-      navigate(`/campaigns/${campaign.id}`);
+      if (isEditMode && id) {
+        // Update existing campaign
+        logger.debug('NewCampaign', 'Updating campaign', {
+          id,
+          name: campaignData.name,
+          subject: campaignData.subject,
+        });
+        await updateCampaign(id, campaignData);
+        logger.debug('NewCampaign', 'Campaign updated', { id });
+        navigate(`/campaigns/${id}`);
+      } else {
+        // Create new campaign
+        logger.debug('NewCampaign', 'Creating campaign', {
+          name: campaignData.name,
+          subject: campaignData.subject,
+          body_html_length: campaignData.body_html?.length,
+        });
+        const campaign = await createCampaign(campaignData);
+        logger.debug('NewCampaign', 'Campaign created', { id: campaign.id });
+        navigate(`/campaigns/${campaign.id}`);
+      }
     } catch (error) {
       logger.error('Error creating campaign:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to create campaign';
@@ -271,11 +323,19 @@ export function NewCampaign() {
     }
   };
 
+  if (loadingCampaign) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">Loading campaign...</div>
+      </div>
+    );
+  }
+
   if (step === 'editor') {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Design Email</h1>
+          <h1 className="text-3xl font-bold">{isEditMode ? 'Edit Email Design' : 'Design Email'}</h1>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep('details')}>
               Back
@@ -286,7 +346,7 @@ export function NewCampaign() {
               className="min-w-[150px]"
             >
               <Save className="mr-2 h-4 w-4" />
-              {loading ? 'Creating...' : 'Create Campaign'}
+              {loading ? (isEditMode ? 'Saving...' : 'Creating...') : (isEditMode ? 'Save Changes' : 'Create Campaign')}
             </Button>
             {errors.general && (
               <div className="text-sm text-destructive mt-2">{errors.general}</div>
@@ -296,17 +356,21 @@ export function NewCampaign() {
             )}
           </div>
         </div>
-        <EmailEditorWrapper ref={editorRef} onSave={handleSaveDesign} />
+        <EmailEditorWrapper 
+          ref={editorRef} 
+          onSave={handleSaveDesign} 
+          initialDesign={design || undefined}
+        />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">New Campaign</h1>
-        <p className="text-muted-foreground">Create a new email campaign</p>
-      </div>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold">{isEditMode ? 'Edit Campaign' : 'New Campaign'}</h1>
+          <p className="text-muted-foreground">{isEditMode ? 'Edit your email campaign' : 'Create a new email campaign'}</p>
+        </div>
 
       <Card>
         <CardHeader>

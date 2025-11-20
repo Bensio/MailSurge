@@ -10,6 +10,7 @@ export const CreateCampaignSchema = z.object({
     delay: z.number().min(1).max(300).default(45),
     ccEmail: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
   }).optional(),
+  design_json: z.unknown().optional().nullable(), // Unlayer design JSON
 });
 
 export const ContactSchema = z.object({

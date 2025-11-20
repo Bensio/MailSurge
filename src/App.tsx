@@ -99,6 +99,16 @@ export function App() {
           }
         />
         <Route
+          path="/campaigns/:id/edit"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <NewCampaign />
+              </AppLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/campaigns/:id"
           element={
             <ProtectedRoute>

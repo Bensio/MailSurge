@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw, Mail } from 'lucide-react';
+import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw, Mail, Edit } from 'lucide-react';
 import { formatDate, validateEmail } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
@@ -467,6 +467,7 @@ export function CampaignDetail() {
 
   const contacts = currentCampaign.contacts || [];
   const canSend = currentCampaign.status === 'draft' && contacts.length > 0;
+  const canEdit = currentCampaign.status === 'draft'; // Only allow editing draft campaigns
   
   // Check contact statuses
   const failedContacts = contacts.filter((c: Contact) => c.status === 'failed');
@@ -504,6 +505,12 @@ export function CampaignDetail() {
               <RefreshCw className="h-4 w-4 animate-spin" />
               <span>Updating...</span>
             </div>
+          )}
+          {canEdit && (
+            <Button onClick={() => navigate(`/campaigns/${id}/edit`)} variant="outline">
+              <Edit className="mr-2 h-4 w-4" />
+              Edit Campaign
+            </Button>
           )}
           {canSend && (
             <>

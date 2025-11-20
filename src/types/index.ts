@@ -15,6 +15,7 @@ export interface Campaign {
     ccEmail?: string | null;
   };
   from_email?: string | null;
+  design_json?: unknown | null; // Unlayer design JSON for visual editing
   created_at: string;
   sent_at?: string | null;
   completed_at?: string | null;

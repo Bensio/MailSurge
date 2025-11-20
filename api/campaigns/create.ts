@@ -10,9 +10,10 @@ const CreateCampaignSchema = z.object({
   body_text: z.string().min(1, 'Plain text version is required'),
   from_email: z.string().email('Invalid from email address').optional().nullable().or(z.literal('').transform(() => null)),
   settings: z.object({
-    delay: z.number().min(30).max(300).default(45),
+    delay: z.number().min(1).max(300).default(45),
     ccEmail: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
   }).optional(),
+  design_json: z.unknown().optional().nullable(), // Unlayer design JSON
 });
 
 // Initialize Supabase client inside handler to catch initialization errors

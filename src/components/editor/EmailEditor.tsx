@@ -103,6 +103,24 @@ export const EmailEditorWrapper = forwardRef<EmailEditorRef, EmailEditorWrapperP
             appearance: {
               theme: 'light',
             },
+            features: {
+              preview: true,
+              stockImages: true,
+              undoRedo: true,
+              textEditor: {
+                spellChecker: true,
+                tables: true,
+                cleanPaste: true,
+              },
+            },
+            mergeTags: {
+              Company: {
+                name: 'Company',
+                value: '{{company}}',
+                sample: 'Acme Corp',
+              },
+            },
+            displayMode: 'email',
           }}
         />
       </div>
