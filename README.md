@@ -73,7 +73,12 @@ cp .env.example .env
 
 5. Run database migrations (in order):
    - Go to Supabase Dashboard → SQL Editor
-   - Run migrations in order: `001_initial_schema.sql`, `002_add_contacts_library.sql`, `003_add_from_email.sql`, `004_add_archived_status.sql`
+   - Run migrations in order: 
+     - `001_initial_schema.sql`
+     - `002_add_contacts_library.sql`
+     - `003_add_from_email.sql`
+     - `004_add_archived_status.sql`
+     - `006_add_design_json.sql` (required for campaign editing)
    - Optionally run `005_remove_duplicate_library_contacts.sql` if you have existing duplicates
 
 6. Start development servers:

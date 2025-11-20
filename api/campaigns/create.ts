@@ -77,11 +77,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Create campaign
-    const campaignData = {
+    const campaignData: Record<string, unknown> = {
       ...validation.data,
       user_id: user.id,
       status: 'draft' as const,
     };
+    
+    // Only include design_json if it exists in validation data
+    // This allows the code to work even if the migration hasn't been run yet
+    if (validation.data.design_json !== undefined) {
+      campaignData.design_json = validation.data.design_json;
+    }
     
     const { data: campaign, error } = await supabaseClient
       .from('campaigns')
@@ -91,6 +97,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (error) {
       console.error('Database error:', error);
+      
+      // If error is about missing design_json column, try again without it
+      if (error.message?.includes('design_json') && validation.data.design_json !== undefined) {
+        console.warn('design_json column not found, retrying without it');
+        const { design_json, ...dataWithoutDesign } = campaignData;
+        const { data: campaignRetry, error: errorRetry } = await supabaseClient
+          .from('campaigns')
+          .insert(dataWithoutDesign as any)
+          .select()
+          .single();
+        
+        if (errorRetry) {
+          return res.status(500).json({ error: 'Failed to create campaign', details: errorRetry.message });
+        }
+        
+        return res.status(201).json(campaignRetry);
+      }
+      
       return res.status(500).json({ error: 'Failed to create campaign', details: error.message });
     }
 
