@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw } from 'lucide-react';
+import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw, Mail } from 'lucide-react';
 import { formatDate, validateEmail } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
@@ -19,7 +19,7 @@ import type { Contact } from '@/types';
 export function CampaignDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentCampaign, loading, error, fetchCampaign, sendCampaign, deleteCampaign } = useCampaignStore();
+  const { currentCampaign, loading, error, fetchCampaign, sendCampaign, testSend, deleteCampaign } = useCampaignStore();
   const { user } = useAuthStore();
   const [showUpload, setShowUpload] = useState(false);
   const [showAddNew, setShowAddNew] = useState(false);
@@ -196,6 +196,23 @@ export function CampaignDetail() {
       alert(`Error: ${errorMessage}`);
     } finally {
       setAddingContact(false);
+    }
+  };
+
+  const handleTestSend = async () => {
+    if (!id) return;
+    const testEmails = user?.user_metadata?.test_emails || [];
+    if (testEmails.length === 0) {
+      alert('No test emails configured. Please add at least one test email in Settings first.');
+      return;
+    }
+    try {
+      const result = await testSend(id);
+      const sentTo = result.testEmails.join(', ');
+      alert(`Test email sent successfully to ${sentTo}!`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send test email';
+      alert(`Error: ${errorMessage}`);
     }
   };
 
@@ -484,10 +501,16 @@ export function CampaignDetail() {
             </div>
           )}
           {canSend && (
-            <Button onClick={handleSend} disabled={loading}>
-              <Send className="mr-2 h-4 w-4" />
-              Send Campaign
-            </Button>
+            <>
+              <Button onClick={handleTestSend} disabled={loading} variant="outline">
+                <Mail className="mr-2 h-4 w-4" />
+                Test Send
+              </Button>
+              <Button onClick={handleSend} disabled={loading}>
+                <Send className="mr-2 h-4 w-4" />
+                Send Campaign
+              </Button>
+            </>
           )}
           {canRetry && (
             <Button onClick={handleRetry} disabled={loading} variant="outline">

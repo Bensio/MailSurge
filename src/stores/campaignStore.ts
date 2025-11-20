@@ -14,6 +14,7 @@ interface CampaignState {
   updateCampaign: (id: string, data: Partial<Campaign>) => Promise<void>;
   deleteCampaign: (id: string) => Promise<void>;
   sendCampaign: (id: string) => Promise<void>;
+  testSend: (id: string) => Promise<{ testEmails: string[] }>;
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -209,6 +210,28 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       set({ error: errorMessage, loading: false });
+    }
+  },
+
+  testSend: async (id: string) => {
+    set({ loading: true, error: null });
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/campaigns/${id}/test-send`, {
+        method: 'POST',
+        headers,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to send test email');
+      }
+      const result = await response.json();
+      set({ loading: false });
+      return { testEmails: result.testEmails || [] };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      set({ error: errorMessage, loading: false });
+      throw error;
     }
   },
 }));
