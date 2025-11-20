@@ -37,7 +37,17 @@ export function CampaignDetail() {
 
   useEffect(() => {
     if (id) {
-      fetchCampaign(id);
+      // Clear previous campaign state when ID changes
+      const store = useCampaignStore.getState();
+      if (store.currentCampaign?.id !== id) {
+        useCampaignStore.setState({ currentCampaign: null, error: null, loading: true });
+      }
+      fetchCampaign(id).catch((err) => {
+        logger.error('Error fetching campaign:', err);
+      });
+    } else {
+      // Clear state if no ID
+      useCampaignStore.setState({ currentCampaign: null, error: null, loading: false });
     }
   }, [id, fetchCampaign]);
 
@@ -376,14 +386,6 @@ export function CampaignDetail() {
     }
   };
 
-  if (loading && !currentCampaign) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">Loading campaign...</div>
-      </div>
-    );
-  }
-
   // Handle 404 redirect
   useEffect(() => {
     if (error === 'NOT_FOUND' || (error && error.includes('NOT_FOUND'))) {
@@ -395,7 +397,17 @@ export function CampaignDetail() {
     return undefined;
   }, [error, navigate]);
 
-  if (error || !currentCampaign) {
+  // Show loading state
+  if (loading && !currentCampaign && !error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">Loading campaign...</div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
     // If 404 error, show redirect message
     if (error === 'NOT_FOUND' || (error && (error.includes('NOT_FOUND') || error.includes('not found')))) {
       return (
@@ -408,7 +420,25 @@ export function CampaignDetail() {
     
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-destructive">Error: {error || 'Campaign not found'}</div>
+        <div className="text-destructive">Error: {error}</div>
+      </div>
+    );
+  }
+
+  // Show error if no campaign and not loading
+  if (!currentCampaign && !loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-destructive">Campaign not found</div>
+      </div>
+    );
+  }
+
+  // Safety check - should never reach here if currentCampaign is null
+  if (!currentCampaign) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">Loading campaign...</div>
       </div>
     );
   }

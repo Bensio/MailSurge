@@ -9,3 +9,4 @@ ALTER TABLE campaigns
   CHECK (status IN ('draft', 'sending', 'paused', 'completed', 'failed', 'archived'));
 
 
+

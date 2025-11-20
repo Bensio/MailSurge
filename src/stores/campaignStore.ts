@@ -29,7 +29,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   };
 }
 
-export const useCampaignStore = create<CampaignState>((set) => ({
+export const useCampaignStore = create<CampaignState>((set, get) => ({
   campaigns: [],
   currentCampaign: null,
   loading: false,
@@ -54,14 +54,11 @@ export const useCampaignStore = create<CampaignState>((set) => ({
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns/${id}`, { headers });
+      
       if (!response.ok) {
-        if (response.status === 404) {
-          // Clear current campaign if it was set
-          set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
-          throw new Error('NOT_FOUND');
-        }
-        // Try to parse error message from response
         let errorMessage = 'Failed to fetch campaign';
+        
+        // Try to parse error message from response
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
@@ -69,18 +66,34 @@ export const useCampaignStore = create<CampaignState>((set) => ({
           // If response isn't JSON, use status text
           errorMessage = `${response.status}: ${response.statusText}`;
         }
-        set({ loading: false, error: errorMessage });
+        
+        // Handle 404 specifically
+        if (response.status === 404 || errorMessage.toLowerCase().includes('not found')) {
+          set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
+          throw new Error('NOT_FOUND');
+        }
+        
+        // Other errors
+        set({ currentCampaign: null, loading: false, error: errorMessage });
         throw new Error(errorMessage);
       }
+      
       const campaign = await response.json();
       set({ currentCampaign: campaign, loading: false, error: null });
     } catch (error) {
-      // Only set error if it's not already set
+      // Only update state if error wasn't already set above
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (errorMessage === 'NOT_FOUND') {
-        set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
-      } else {
-        set({ loading: false, error: errorMessage });
+      const currentState = get();
+      
+      if (currentState.error === null) {
+        if (errorMessage === 'NOT_FOUND') {
+          set({ currentCampaign: null, loading: false, error: 'NOT_FOUND' });
+        } else if (!errorMessage.includes('Failed to fetch campaign')) {
+          // Don't overwrite with generic error if we already have a specific one
+          set({ loading: false, error: errorMessage });
+        } else {
+          set({ loading: false, error: 'Failed to fetch campaign' });
+        }
       }
       throw error; // Re-throw so callers can handle it
     }

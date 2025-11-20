@@ -8,3 +8,4 @@ ALTER TABLE campaigns
 COMMENT ON COLUMN campaigns.from_email IS 'Email address to send campaign from (must match connected Gmail account)';
 
 
+
