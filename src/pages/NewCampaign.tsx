@@ -42,6 +42,7 @@ export function NewCampaign() {
   const exportedHtmlRef = useRef<{ html: string; text: string } | null>(null);
   const [gmailAccounts, setGmailAccounts] = useState<Array<{ email: string }>>([]);
   const [loadingCampaign, setLoadingCampaign] = useState(false);
+  const [isCreating, setIsCreating] = useState(false); // Local loading state for immediate feedback
 
   // Load campaign data if in edit mode
   useEffect(() => {
@@ -225,6 +226,7 @@ export function NewCampaign() {
   const handleCreate = async () => {
     try {
       setErrors({});
+      setIsCreating(true); // Set loading immediately for better UX
       logger.debug('NewCampaign', 'Creating campaign');
       
       // Try to export the design from the editor
@@ -339,6 +341,8 @@ export function NewCampaign() {
       logger.error('Error creating campaign:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to create campaign';
       setErrors({ general: errorMessage });
+    } finally {
+      setIsCreating(false); // Always clear loading state
     }
   };
 
@@ -361,11 +365,11 @@ export function NewCampaign() {
             </Button>
             <Button 
               onClick={handleCreate} 
-              disabled={loading}
+              disabled={loading || isCreating}
               className="min-w-[150px]"
             >
               <Save className="mr-2 h-4 w-4" />
-              {loading ? (isEditMode ? 'Saving...' : 'Creating...') : (isEditMode ? 'Save Changes' : 'Create Campaign')}
+              {(loading || isCreating) ? (isEditMode ? 'Saving...' : 'Creating...') : (isEditMode ? 'Save Changes' : 'Create Campaign')}
             </Button>
             {errors.general && (
               <div className="text-sm text-destructive mt-2">{errors.general}</div>

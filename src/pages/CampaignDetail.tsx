@@ -562,10 +562,6 @@ export function CampaignDetail() {
                 <span className="ml-2">{currentCampaign.settings.ccEmail}</span>
               </div>
             )}
-            <div>
-              <span className="text-sm text-muted-foreground">Delay:</span>
-              <span className="ml-2">{currentCampaign.settings.delay} seconds</span>
-            </div>
           </CardContent>
         </Card>
 
