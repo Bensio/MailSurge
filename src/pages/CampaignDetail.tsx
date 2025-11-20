@@ -408,15 +408,12 @@ export function CampaignDetail() {
     }
   };
 
-  // Handle 404 redirect - redirect quickly to avoid showing error
+  // Handle 404 redirect - redirect immediately to avoid showing error
   useEffect(() => {
     if (error === 'NOT_FOUND' || (error && error.includes('NOT_FOUND'))) {
-      const timer = setTimeout(() => {
-        navigate('/campaigns');
-      }, 500); // Reduced delay to minimize error visibility
-      return () => clearTimeout(timer);
+      // Redirect immediately without delay
+      navigate('/campaigns', { replace: true });
     }
-    return undefined;
   }, [error, navigate]);
 
   // Show loading state
@@ -428,18 +425,8 @@ export function CampaignDetail() {
     );
   }
 
-  // Show error state
-  if (error) {
-    // If 404 error, show redirect message
-    if (error === 'NOT_FOUND' || (error && (error.includes('NOT_FOUND') || error.includes('not found')))) {
-      return (
-        <div className="flex flex-col items-center justify-center h-64 space-y-4">
-          <div className="text-destructive">Campaign not found</div>
-          <div className="text-sm text-muted-foreground">Redirecting to campaigns list...</div>
-        </div>
-      );
-    }
-    
+  // Show error state (but don't show NOT_FOUND as it redirects immediately)
+  if (error && error !== 'NOT_FOUND' && !error.includes('NOT_FOUND')) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-destructive">Error: {error}</div>
@@ -563,6 +550,16 @@ export function CampaignDetail() {
               <div>
                 <span className="text-sm text-muted-foreground">Completed:</span>
                 <span className="ml-2">{formatDate(currentCampaign.completed_at)}</span>
+              </div>
+            )}
+            <div>
+              <span className="text-sm text-muted-foreground">Delay:</span>
+              <span className="ml-2">{currentCampaign.settings?.delay || 45} seconds</span>
+            </div>
+            {currentCampaign.settings?.ccEmail && (
+              <div>
+                <span className="text-sm text-muted-foreground">CC:</span>
+                <span className="ml-2">{currentCampaign.settings.ccEmail}</span>
               </div>
             )}
             <div>

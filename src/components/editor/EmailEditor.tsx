@@ -20,13 +20,46 @@ export const EmailEditorWrapper = forwardRef<EmailEditorRef, EmailEditorWrapperP
     const onLoad = () => {
       logger.debug('EmailEditor', 'Editor loaded');
       setIsReady(true);
-      if (initialDesign && emailEditorRef.current) {
-        const editor = emailEditorRef.current.editor || emailEditorRef.current;
+      // Load design after a short delay to ensure editor is fully initialized
+      setTimeout(() => {
+        if (initialDesign && emailEditorRef.current) {
+          let editor = emailEditorRef.current;
+          // Try multiple ways to access the editor
+          if (editor && editor.editor) {
+            editor = editor.editor;
+          }
+          if (editor && typeof editor.loadDesign === 'function') {
+            logger.debug('EmailEditor', 'Loading design', { hasDesign: !!initialDesign });
+            try {
+              editor.loadDesign(initialDesign);
+              logger.debug('EmailEditor', 'Design loaded successfully');
+            } catch (error) {
+              logger.error('EmailEditor', 'Error loading design:', error);
+            }
+          } else {
+            logger.warn('EmailEditor', 'loadDesign method not available');
+          }
+        }
+      }, 100);
+    };
+
+    // Also load design when initialDesign changes after editor is ready
+    useEffect(() => {
+      if (isReady && initialDesign && emailEditorRef.current) {
+        let editor = emailEditorRef.current;
+        if (editor && editor.editor) {
+          editor = editor.editor;
+        }
         if (editor && typeof editor.loadDesign === 'function') {
-          editor.loadDesign(initialDesign);
+          logger.debug('EmailEditor', 'Loading design from useEffect', { hasDesign: !!initialDesign });
+          try {
+            editor.loadDesign(initialDesign);
+          } catch (error) {
+            logger.error('EmailEditor', 'Error loading design from useEffect:', error);
+          }
         }
       }
-    };
+    }, [isReady, initialDesign]);
 
     const exportHtml = useCallback(() => {
       if (!emailEditorRef.current) {

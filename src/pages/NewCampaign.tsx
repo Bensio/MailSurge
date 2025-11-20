@@ -51,6 +51,7 @@ export function NewCampaign() {
         .then(() => {
           const campaign = useCampaignStore.getState().currentCampaign;
           if (campaign) {
+            const delay = campaign.settings?.delay ?? 45; // Use nullish coalescing to preserve 0
             setFormData({
               name: campaign.name,
               subject: campaign.subject,
@@ -58,13 +59,18 @@ export function NewCampaign() {
               body_text: campaign.body_text,
               from_email: campaign.from_email || '',
               settings: {
-                delay: campaign.settings?.delay || 45,
+                delay: delay,
                 ccEmail: campaign.settings?.ccEmail || '',
               },
             });
-            setDelayInputValue(String(campaign.settings?.delay || 45));
+            setDelayInputValue(String(delay));
+            // Set design JSON - this will be passed to editor
             if (campaign.design_json) {
+              logger.debug('NewCampaign', 'Loading design JSON for edit', { hasDesign: !!campaign.design_json });
               setDesign(campaign.design_json);
+            } else {
+              logger.warn('NewCampaign', 'No design_json found for campaign', { id });
+              setDesign(null);
             }
           }
         })
@@ -263,10 +269,23 @@ export function NewCampaign() {
           : 'Email content - design your email in the editor');
 
       // Clean up settings - convert empty string to null for ccEmail
+      // Use the actual delay value from formData - preserve the value user entered
+      const delayValue = formData.settings?.delay;
+      // Only clamp if value is outside valid range, otherwise use the exact value
+      const finalDelay = (delayValue !== undefined && delayValue !== null && delayValue >= 1 && delayValue <= 300)
+        ? delayValue
+        : (delayValue ?? 45); // Use nullish coalescing - only default if null/undefined
+      
       const cleanedSettings = {
-        delay: Math.max(1, Math.min(300, formData.settings?.delay || 45)), // Ensure delay is between 1 and 300
+        delay: finalDelay,
         ccEmail: formData.settings?.ccEmail === '' ? null : formData.settings?.ccEmail || null,
       };
+      
+      logger.debug('NewCampaign', 'Saving settings', { 
+        originalDelay: delayValue, 
+        finalDelay: finalDelay,
+        ccEmail: cleanedSettings.ccEmail 
+      });
 
       const validationData = {
         ...formData,
