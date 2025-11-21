@@ -7,7 +7,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { EmailEditorWrapper, type EmailEditorRef } from '@/components/editor/EmailEditor';
+import { lazy, Suspense } from 'react';
+import type { EmailEditorRef } from '@/components/editor/EmailEditor';
+
+// Lazy load the heavy EmailEditor component
+const EmailEditorWrapper = lazy(() => 
+  import('@/components/editor/EmailEditor').then(module => ({ 
+    default: module.EmailEditorWrapper 
+  }))
+);
 import { getConnectedGmailAccounts } from '@/lib/gmail';
 import { logger } from '@/lib/logger';
 import { Save } from 'lucide-react';
@@ -379,11 +387,17 @@ export function NewCampaign() {
             )}
           </div>
         </div>
-        <EmailEditorWrapper 
-          ref={editorRef} 
-          onSave={handleSaveDesign} 
-          initialDesign={design || undefined}
-        />
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-screen">
+            <div className="text-muted-foreground">Loading email editor...</div>
+          </div>
+        }>
+          <EmailEditorWrapper 
+            ref={editorRef} 
+            onSave={handleSaveDesign} 
+            initialDesign={design || undefined}
+          />
+        </Suspense>
       </div>
     );
   }

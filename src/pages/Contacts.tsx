@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { debounce } from '@/lib/debounce';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -31,7 +32,22 @@ export function Contacts() {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'library' | 'all' | 'campaigns'>('library');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
+
+  // Debounce search query to avoid filtering on every keystroke
+  useEffect(() => {
+    const debounced = debounce((value: string) => {
+      setDebouncedSearchQuery(value);
+    }, 300);
+    
+    debounced(searchQuery);
+    
+    // Cleanup function
+    return () => {
+      // Debounce cleanup is handled internally
+    };
+  }, [searchQuery]);
   
   // Single contact form
   const [singleName, setSingleName] = useState('');
@@ -289,8 +305,8 @@ export function Contacts() {
     }
     
     // Filter by search
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    if (debouncedSearchQuery) {
+      const query = debouncedSearchQuery.toLowerCase();
       filtered = filtered.filter(c => 
         c.email.toLowerCase().includes(query) ||
         c.company.toLowerCase().includes(query) ||

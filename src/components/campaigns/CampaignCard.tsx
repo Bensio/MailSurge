@@ -1,3 +1,4 @@
+import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Campaign } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,13 +18,17 @@ const statusColors: Record<Campaign['status'], string> = {
   archived: 'bg-gray-400',
 };
 
-export function CampaignCard({ campaign }: CampaignCardProps) {
+export const CampaignCard = memo(function CampaignCard({ campaign }: CampaignCardProps) {
   const navigate = useNavigate();
+
+  const handleClick = useCallback(() => {
+    navigate(`/campaigns/${campaign.id}`);
+  }, [navigate, campaign.id]);
 
   return (
     <Card
       className="cursor-pointer hover:shadow-lg transition-shadow"
-      onClick={() => navigate(`/campaigns/${campaign.id}`)}
+      onClick={handleClick}
     >
       <CardHeader>
         <div className="flex items-start justify-between">
@@ -41,7 +46,7 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
       </CardContent>
     </Card>
   );
-}
+});
 
 
 

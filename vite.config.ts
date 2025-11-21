@@ -25,5 +25,16 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['googleapis'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'editor': ['react-email-editor'],
+          'ui': ['lucide-react'],
+        },
+      },
+    },
+  },
 });
 

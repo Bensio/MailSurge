@@ -146,11 +146,6 @@ export const EmailEditorWrapper = forwardRef<EmailEditorRef, EmailEditorWrapperP
                 cleanPaste: true,
               },
             },
-            // Note: Column drag-and-drop may have limitations in Unlayer
-            // If you can't drag into left column, try:
-            // 1. Click on the left column first to select it
-            // 2. Use the "Add Block" button instead of drag-and-drop
-            // 3. Drag content to the right column, then use copy/paste to move it
             mergeTags: {
               Company: {
                 name: 'Company',
