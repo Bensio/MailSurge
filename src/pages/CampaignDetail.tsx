@@ -454,7 +454,8 @@ export function CampaignDetail() {
 
   const contacts = currentCampaign.contacts || [];
   const canSend = currentCampaign.status === 'draft' && contacts.length > 0;
-  const canEdit = currentCampaign.status === 'draft'; // Only allow editing draft campaigns
+  // Allow editing for draft, paused, and failed campaigns (not for sending, completed, or archived)
+  const canEdit = ['draft', 'paused', 'failed'].includes(currentCampaign.status);
   
   // Check contact statuses
   const failedContacts = contacts.filter((c: Contact) => c.status === 'failed');
