@@ -71,7 +71,7 @@ export function NewReminder() {
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/reminders/rules`, {
+      const response = await fetch(`${API_BASE}/campaigns?type=reminders`, {
         method: 'POST',
         headers,
         body: JSON.stringify(formData),

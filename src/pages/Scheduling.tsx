@@ -72,7 +72,7 @@ export function Scheduling() {
     if (!user) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/reminders/rules`, { headers });
+      const response = await fetch(`${API_BASE}/campaigns?type=reminders`, { headers });
       if (response.ok) {
         const data = await response.json();
         setReminderRules(data);

@@ -98,7 +98,7 @@ export function ContactsUpload({ campaignId, onUploadComplete }: ContactsUploadP
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch('/api/contacts/upload', {
+      const response = await fetch('/api/campaigns?type=contacts', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,

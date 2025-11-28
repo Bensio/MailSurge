@@ -62,7 +62,7 @@ export function Settings() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
-          const response = await fetch('/api/gmail/fetch-email', {
+          const response = await fetch('/api/campaigns?type=gmail', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
