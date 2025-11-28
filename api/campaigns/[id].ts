@@ -29,11 +29,16 @@ function getInngestClient() {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Wrap everything in try-catch to catch any unhandled errors
   try {
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, DELETE, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Content-Type', 'application/json');
+    // Set CORS headers first - before any other operations
+    try {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, DELETE, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Content-Type', 'application/json');
+    } catch (headerError) {
+      console.error('[Campaign Detail] Error setting headers:', headerError);
+      // Continue anyway - headers might already be set
+    }
 
     // Handle preflight
     if (req.method === 'OPTIONS') {
@@ -46,7 +51,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Server configuration error', details: 'Supabase not configured' });
     }
 
-    const supabase = getSupabaseClient();
+    let supabase;
+    try {
+      supabase = getSupabaseClient();
+    } catch (supabaseError) {
+      console.error('[Campaign Detail] Error creating Supabase client:', supabaseError);
+      return res.status(500).json({ 
+        error: 'Server configuration error', 
+        details: 'Failed to initialize database connection' 
+      });
+    }
     const { id, action } = req.query;
 
     if (typeof id !== 'string') {
@@ -59,10 +73,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      console.error('Auth error:', authError);
-      return res.status(401).json({ error: 'Invalid token' });
+    let user;
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+      if (authError || !authUser) {
+        console.error('[Campaign Detail] Auth error:', authError);
+        return res.status(401).json({ error: 'Invalid token', details: authError?.message });
+      }
+      user = authUser;
+    } catch (authException) {
+      console.error('[Campaign Detail] Exception during auth:', authException);
+      return res.status(500).json({ 
+        error: 'Authentication error', 
+        details: authException instanceof Error ? authException.message : 'Unknown error' 
+      });
     }
 
     // Route based on action parameter or method
