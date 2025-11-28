@@ -2,8 +2,8 @@ import { Inngest, InngestCommHandler } from 'inngest';
 import { createClient } from '@supabase/supabase-js';
 import { google } from 'googleapis';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { generateTrackingToken, injectTrackingPixel } from './lib/tracking';
-import { processEmailImages } from './lib/image-processing';
+import { generateTrackingToken } from './lib/tracking';
+import { sendEmail } from './lib/email-service';
 
 // Initialize Inngest client for the serve endpoint
 const inngest = new Inngest({ 
@@ -11,101 +11,8 @@ const inngest = new Inngest({
   name: 'MailSurge',
 });
 
-// Import the send email function
-async function sendEmail(
-  contact: { email: string; company: string; id: string },
-  campaign: {
-    subject: string;
-    body_html: string;
-    body_text: string;
-    settings: { delay?: number; ccEmail?: string | null };
-  },
-  oauth2Client: any,
-  senderEmail: string,
-  trackingToken?: string
-) {
-  // Personalize email
-  let html = campaign.body_html;
-  let subject = campaign.subject;
-
-  // Replace {{company}} with actual company name
-  html = html.replace(/\{\{company\}\}/g, contact.company);
-  subject = subject.replace(/\{\{company\}\}/g, contact.company);
-
-  // Process images to ensure all use absolute URLs
-  // Get base URL for image processing
-  let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!baseUrl) {
-    if (process.env.VERCEL_URL) {
-      baseUrl = `https://${process.env.VERCEL_URL}`;
-    } else {
-      baseUrl = 'https://mailsurge.vercel.app';
-    }
-  }
-  baseUrl = baseUrl.replace(/\/$/, '');
-  
-  // Process images to convert relative URLs to absolute
-  html = processEmailImages(html, baseUrl);
-
-  // Inject tracking pixel if tracking token is provided
-  if (trackingToken) {
-    // Get base URL - prefer explicit env var, then Vercel URL, then fallback
-    let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
-    
-    if (!baseUrl) {
-      // Use VERCEL_URL if available (but this might be a preview URL)
-      if (process.env.VERCEL_URL) {
-        baseUrl = `https://${process.env.VERCEL_URL}`;
-      } else {
-        // Fallback to production URL
-        baseUrl = 'https://mailsurge.vercel.app';
-      }
-    }
-    
-    // Ensure baseUrl doesn't have trailing slash
-    baseUrl = baseUrl.replace(/\/$/, '');
-    
-    console.log(`[Inngest] Injecting tracking pixel with baseUrl: ${baseUrl}, token: ${trackingToken.substring(0, 8)}...`);
-    html = injectTrackingPixel(html, trackingToken, baseUrl);
-  }
-
-  // Create email
-  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-  // Create email with proper headers
-  const emailLines = [
-    `From: ${senderEmail}`,
-    `To: ${contact.email}`,
-  ];
-  
-  if (campaign.settings.ccEmail) {
-    emailLines.push(`Cc: ${campaign.settings.ccEmail}`);
-  }
-  
-  emailLines.push(
-    `Subject: ${subject}`,
-    'Content-Type: text/html; charset=utf-8',
-    'MIME-Version: 1.0',
-    '',
-    html
-  );
-
-  const email = emailLines.join('\r\n');
-
-  // Encode to base64url format (Gmail API requirement)
-  const encodedEmail = Buffer.from(email)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-
-  await gmail.users.messages.send({
-    userId: 'me',
-    requestBody: {
-      raw: encodedEmail,
-    },
-  });
-}
+// Email sending is handled by unified sendEmail function from email-service.ts
+// Supports both Gmail OAuth API and SMTP with automatic fallback
 
 // Define the email sending function
 export const sendCampaignEmails = inngest.createFunction(
@@ -126,14 +33,12 @@ export const sendCampaignEmails = inngest.createFunction(
     });
     
     try {
-      const { campaignId, userId, accessToken, refreshToken } = event.data;
+      const { campaignId, userId } = event.data;
 
       console.log('[Inngest Function] Starting email sending for campaign:', campaignId);
       console.log('[Inngest Function] Event data:', {
         campaignId,
         userId,
-        hasAccessToken: !!accessToken,
-        hasRefreshToken: !!refreshToken,
       });
 
       // Check environment variables
@@ -141,8 +46,12 @@ export const sendCampaignEmails = inngest.createFunction(
         throw new Error('Missing Supabase environment variables');
       }
 
-      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-        throw new Error('Missing Google OAuth environment variables');
+      // Check if at least one email method is configured
+      const hasSMTP = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+      const hasGmailOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI);
+      
+      if (!hasSMTP && !hasGmailOAuth) {
+        throw new Error('No email sending method configured. Please set up either SMTP (SMTP_USER, SMTP_PASSWORD) or Gmail OAuth (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI).');
       }
 
       // Initialize Supabase
@@ -187,7 +96,7 @@ export const sendCampaignEmails = inngest.createFunction(
       throw new Error(`Campaign ${campaignId} not found after step execution`);
     }
 
-    // Get user for email fallback
+    // Get user to check for Gmail OAuth tokens
     const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(userId);
     if (userError || !user) {
       console.error('[Inngest Function] Error fetching user:', userError);
@@ -195,77 +104,69 @@ export const sendCampaignEmails = inngest.createFunction(
     }
     console.log('[Inngest Function] User found:', user.email);
 
-    // Set up OAuth client
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    let redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    // Try to set up Gmail OAuth if user has tokens
+    let oauth2Client: any = null;
+    let senderEmail: string | null = null;
+    const accessToken = user.user_metadata?.gmail_token;
+    const refreshToken = user.user_metadata?.gmail_refresh_token;
     
-    if (!clientId || !clientSecret || !redirectUri) {
-      console.error('[Inngest Function] Missing Google OAuth credentials:', {
-        hasClientId: !!clientId,
-        hasClientSecret: !!clientSecret,
-        hasRedirectUri: !!redirectUri,
-      });
-      throw new Error('Missing Google OAuth credentials in environment variables');
-    }
-    
-    // Ensure redirect URI has protocol (fix for missing https://)
-    if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
-      console.warn('[Inngest Function] Redirect URI missing protocol, adding https://');
-      redirectUri = `https://${redirectUri}`;
-    }
-    
-    console.log('[Inngest Function] OAuth client config:', {
-      hasClientId: !!clientId,
-      clientIdPrefix: clientId.substring(0, 20) + '...',
-      hasClientSecret: !!clientSecret,
-      redirectUri: redirectUri,
-    });
-    
-    const oauth2Client = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      redirectUri
-    );
-
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    // Set up token refresh handler
-    oauth2Client.on('tokens', async (tokens) => {
-      if (tokens.refresh_token) {
-        await supabase.auth.admin.updateUserById(userId, {
-          user_metadata: {
-            ...user?.user_metadata,
-            gmail_token: tokens.access_token,
-            gmail_refresh_token: tokens.refresh_token,
-            gmail_token_expiry: tokens.expiry_date,
-          },
-        });
-      } else if (tokens.access_token) {
-        await supabase.auth.admin.updateUserById(userId, {
-          user_metadata: {
-            ...user?.user_metadata,
-            gmail_token: tokens.access_token,
-            gmail_token_expiry: tokens.expiry_date,
-          },
-        });
-      }
-    });
-
-    // Get sender email
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const senderEmail = await step.run('get-sender-email', async () => {
+    if (accessToken && refreshToken && hasGmailOAuth) {
       try {
-        const profile = await gmail.users.getProfile({ userId: 'me' });
-        return profile.data.emailAddress || user?.email || '';
-      } catch (error) {
-        console.error('Error getting Gmail profile:', error);
-        return user?.email || '';
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+        
+        if (redirectUri && !redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+          redirectUri = `https://${redirectUri}`;
+        }
+        
+        oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+        oauth2Client.setCredentials({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+
+        // Set up token refresh handler
+        oauth2Client.on('tokens', async (tokens: any) => {
+          if (tokens.refresh_token) {
+            await supabase.auth.admin.updateUserById(userId, {
+              user_metadata: {
+                ...user?.user_metadata,
+                gmail_token: tokens.access_token,
+                gmail_refresh_token: tokens.refresh_token,
+                gmail_token_expiry: tokens.expiry_date,
+              },
+            });
+          } else if (tokens.access_token) {
+            await supabase.auth.admin.updateUserById(userId, {
+              user_metadata: {
+                ...user?.user_metadata,
+                gmail_token: tokens.access_token,
+                gmail_token_expiry: tokens.expiry_date,
+              },
+            });
+          }
+        });
+
+        // Get sender email from Gmail profile
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        try {
+          const profile = await gmail.users.getProfile({ userId: 'me' });
+          senderEmail = profile.data.emailAddress || user?.email || '';
+          console.log('[Inngest Function] Using Gmail OAuth for email sending:', senderEmail);
+        } catch (profileError) {
+          console.warn('[Inngest Function] Could not get Gmail profile, will use SMTP fallback:', profileError);
+          oauth2Client = null;
+        }
+      } catch (oauthError) {
+        console.warn('[Inngest Function] Gmail OAuth setup failed, will use SMTP fallback:', oauthError);
+        oauth2Client = null;
       }
-    });
+    }
+
+    if (!oauth2Client) {
+      console.log('[Inngest Function] Using SMTP for email sending (no Gmail OAuth tokens or setup failed)');
+    }
 
     // Filter contacts to send
     const contacts = (campaign.contacts || []).filter(
@@ -309,8 +210,14 @@ export const sendCampaignEmails = inngest.createFunction(
             console.log(`[Inngest] Stored tracking token for contact ${contact.id}`);
           }
 
-          // Send email with tracking pixel
-          await sendEmail(contact, campaign, oauth2Client, senderEmail, trackingToken);
+          // Send email (will use Gmail OAuth if available, otherwise SMTP)
+          // Retry up to 2 times for better reliability
+          await sendEmail(contact, campaign, {
+            oauth2Client: oauth2Client || undefined,
+            senderEmail: senderEmail || undefined,
+            trackingToken,
+            retries: 2,
+          });
 
           // Update to sent
           await supabase
@@ -489,58 +396,41 @@ export const processReminders = inngest.createFunction(
     for (const reminder of reminders) {
       await step.run(`send-reminder-${reminder.id}`, async () => {
         try {
-          // Get user's Gmail tokens
+          // Get user's Gmail tokens (if available)
           const { data: userData, error: userError } = await supabase.auth.admin.getUserById(reminder.user_id);
           
-          if (userError || !userData?.user) {
-            console.error(`[Inngest Reminders] Error getting user ${reminder.user_id}:`, userError);
-            await supabase
-              .from('reminder_queue')
-              .update({ status: 'failed' })
-              .eq('id', reminder.id);
-            return;
-          }
+          let oauth2Client: any = null;
+          let senderEmail: string | null = null;
+          
+          if (!userError && userData?.user) {
+            const user = userData.user;
+            const accessToken = user.user_metadata?.gmail_token;
+            const refreshToken = user.user_metadata?.gmail_refresh_token;
+            
+            if (accessToken && refreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+              try {
+                let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+                if (redirectUri && !redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+                  redirectUri = `https://${redirectUri}`;
+                }
+                
+                oauth2Client = new google.auth.OAuth2(
+                  process.env.GOOGLE_CLIENT_ID,
+                  process.env.GOOGLE_CLIENT_SECRET,
+                  redirectUri
+                );
+                oauth2Client.setCredentials({
+                  access_token: accessToken,
+                  refresh_token: refreshToken,
+                });
 
-          const user = userData.user;
-          const accessToken = user.user_metadata?.gmail_token;
-          const refreshToken = user.user_metadata?.gmail_refresh_token;
-
-          if (!accessToken || !refreshToken) {
-            console.error(`[Inngest Reminders] Missing Gmail tokens for user ${reminder.user_id}`);
-            await supabase
-              .from('reminder_queue')
-              .update({ status: 'failed' })
-              .eq('id', reminder.id);
-            return;
-          }
-
-          // Set up OAuth client
-          const oauth2Client = new google.auth.OAuth2(
-            process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_CLIENT_SECRET,
-            process.env.GOOGLE_REDIRECT_URI
-          );
-
-          oauth2Client.setCredentials({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-
-          // Refresh token if needed
-          if (user.user_metadata?.gmail_token_expiry) {
-            const expiry = new Date(user.user_metadata.gmail_token_expiry);
-            if (expiry < new Date()) {
-              const { credentials } = await oauth2Client.refreshAccessToken();
-              oauth2Client.setCredentials(credentials);
-              
-              // Update tokens in database
-              await supabase.auth.admin.updateUserById(reminder.user_id, {
-                user_metadata: {
-                  ...user.user_metadata,
-                  gmail_token: credentials.access_token,
-                  gmail_token_expiry: credentials.expiry_date,
-                },
-              });
+                // Get sender email
+                const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+                const profile = await gmail.users.getProfile({ userId: 'me' });
+                senderEmail = profile.data.emailAddress || user.email || '';
+              } catch (oauthError) {
+                console.warn(`[Inngest Reminders] Gmail OAuth setup failed for reminder ${reminder.id}, using SMTP:`, oauthError);
+              }
             }
           }
 
@@ -566,18 +456,13 @@ export const processReminders = inngest.createFunction(
             return;
           }
 
-          // Get sender email
-          const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-          const profile = await gmail.users.getProfile({ userId: 'me' });
-          const senderEmail = profile.data.emailAddress || user.email || '';
-
           // Generate tracking token for reminder email
           const reminderTrackingToken = generateTrackingToken();
           
           // Store tracking token in reminder_queue (NOT in contacts - that's for campaign emails)
           // This allows us to distinguish between campaign opens and reminder opens
 
-          // Send reminder email using existing sendEmail function
+          // Send reminder email (will use Gmail OAuth if available, otherwise SMTP)
           await sendEmail(
             { email: contact.email, company: contact.company, id: contact.id },
             {
@@ -586,9 +471,11 @@ export const processReminders = inngest.createFunction(
               body_text: reminderCampaign.body_text || '',
               settings: reminderCampaign.settings || { delay: 45 },
             },
-            oauth2Client,
-            senderEmail,
-            reminderTrackingToken
+            {
+              oauth2Client: oauth2Client || undefined,
+              senderEmail: senderEmail || undefined,
+              trackingToken: reminderTrackingToken,
+            }
           );
 
           // Update queue status with tracking token
@@ -655,39 +542,12 @@ export const processScheduledCampaigns = inngest.createFunction(
     for (const campaign of scheduledCampaigns) {
       await step.run(`send-scheduled-campaign-${campaign.id}`, async () => {
         try {
-          // Get user's Gmail tokens
-          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(campaign.user_id);
-          
-          if (userError || !userData?.user) {
-            console.error(`[Inngest Scheduled] Error getting user ${campaign.user_id}:`, userError);
-            await supabase
-              .from('campaigns')
-              .update({ status: 'failed', scheduled_at: null })
-              .eq('id', campaign.id);
-            return;
-          }
-
-          const user = userData.user;
-          const accessToken = user.user_metadata?.gmail_token;
-          const refreshToken = user.user_metadata?.gmail_refresh_token;
-
-          if (!accessToken || !refreshToken) {
-            console.error(`[Inngest Scheduled] Missing Gmail tokens for user ${campaign.user_id}`);
-            await supabase
-              .from('campaigns')
-              .update({ status: 'failed', scheduled_at: null })
-              .eq('id', campaign.id);
-            return;
-          }
-
-          // Trigger the campaign send
+          // Trigger the campaign send (no OAuth tokens needed - SMTP handles it)
           await inngest.send({
             name: 'campaign/send',
             data: {
               campaignId: campaign.id,
               userId: campaign.user_id,
-              accessToken: accessToken,
-              refreshToken: refreshToken,
             },
           });
 

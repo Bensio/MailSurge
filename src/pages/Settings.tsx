@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 import { CheckCircle2, XCircle, ExternalLink, Info, Trash2, RefreshCw, X, Plus } from 'lucide-react';
 import { validateEmail } from '@/lib/utils';
+import { SystemStatus } from '@/components/Settings/SystemStatus';
 
 export function Settings() {
   const { user, refreshUser } = useAuthStore();
@@ -32,11 +33,8 @@ export function Settings() {
     };
     
     loadData();
-    
-    // Check for success parameter - but only show if accounts are actually found
-    // We'll check this after checkGmailConnection runs
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams]); // Only depend on searchParams, refresh on every mount
+  }, [searchParams, setSearchParams]);
 
   const checkGmailConnection = async () => {
     setLoading(true);
@@ -148,6 +146,31 @@ export function Settings() {
     }
   };
 
+  const handleConnectGmail = async () => {
+    if (!user) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert('Please sign in first');
+        return;
+      }
+
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      if (!clientId || clientId === 'placeholder-client-id') {
+        alert('Google OAuth is not configured. Please add VITE_GOOGLE_CLIENT_ID to your .env file and restart the server.');
+        return;
+      }
+
+      const authUrl = getGmailAuthUrl();
+      const state = session.access_token;
+      window.location.href = `${authUrl}&state=${encodeURIComponent(state)}`;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to connect Gmail';
+      alert(`Error: ${errorMessage}`);
+    }
+  };
+
   const loadTestEmail = () => {
     const store = useAuthStore.getState();
     const currentUser = store.user;
@@ -210,38 +233,12 @@ export function Settings() {
       if (error) throw error;
 
       await refreshUser();
-      setSuccessMessage(`Test email${validEmails.length > 1 ? 's' : ''} saved successfully!`);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      alert(`Test email${validEmails.length > 1 ? 's' : ''} saved successfully!`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to save test emails';
       alert(`Error: ${errorMessage}`);
     } finally {
       setSavingTestEmail(false);
-    }
-  };
-
-  const handleConnectGmail = async () => {
-    if (!user) return;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        alert('Please sign in first');
-        return;
-      }
-
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-      if (!clientId || clientId === 'placeholder-client-id') {
-        alert('Google OAuth is not configured. Please add VITE_GOOGLE_CLIENT_ID to your .env file and restart the server.');
-        return;
-      }
-
-      const authUrl = getGmailAuthUrl();
-      const state = session.access_token;
-      window.location.href = `${authUrl}&state=${encodeURIComponent(state)}`;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to connect Gmail';
-      alert(`Error: ${errorMessage}`);
     }
   };
 
@@ -252,11 +249,13 @@ export function Settings() {
         <p className="text-muted-foreground">Manage your account and integrations</p>
       </div>
 
+      <SystemStatus />
+
       <Card>
         <CardHeader>
-          <CardTitle>Gmail Integration</CardTitle>
+          <CardTitle>Gmail Integration (OAuth)</CardTitle>
           <CardDescription>
-            Connect your Gmail account to send emails through MailSurge
+            Connect your Gmail account to send emails using your own Gmail address
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -292,43 +291,19 @@ export function Settings() {
                       </div>
                     ))}
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Emails will be sent from your connected Gmail account. If not connected, SMTP (admin-configured) will be used as fallback.
+                  </p>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <XCircle className="h-5 w-5 text-red-500" />
-                  <span>Gmail is not connected</span>
-                </div>
-              )}
-
-              {gmailAccounts.length === 0 && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
-                  <div className="flex items-start gap-2">
-                    <Info className="h-5 w-5 text-blue-600 mt-0.5" />
-                    <div className="flex-1 space-y-2">
-                      <p className="text-sm font-medium text-blue-900">Setup Required</p>
-                      <p className="text-sm text-blue-800">
-                        To connect Gmail, you need to set up Google OAuth credentials first.
-                      </p>
-                      <ol className="list-decimal list-inside space-y-1 text-xs text-blue-700 ml-2">
-                        <li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">Google Cloud Console</a></li>
-                        <li>Create a project and enable Gmail API</li>
-                        <li>Create OAuth 2.0 credentials (Web application)</li>
-                        <li>Add redirect URI: <code className="bg-blue-100 px-1 rounded">{import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/callback'}</code></li>
-                        <li>Copy Client ID and Secret to your <code className="bg-blue-100 px-1 rounded">.env</code> file</li>
-                        <li>Restart the dev server</li>
-                      </ol>
-                      <div className="pt-2">
-                        <a 
-                          href="/docs/GMAIL_SETUP.md" 
-                          target="_blank"
-                          className="text-xs text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
-                        >
-                          View detailed setup guide
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                    </div>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <XCircle className="h-5 w-5 text-yellow-500" />
+                    <span>No Gmail account connected</span>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Connect your Gmail to send from your own address. If not connected, emails will be sent via SMTP (admin-configured).
+                  </p>
                 </div>
               )}
 
@@ -351,11 +326,44 @@ export function Settings() {
 
               {(!import.meta.env.VITE_GOOGLE_CLIENT_ID || import.meta.env.VITE_GOOGLE_CLIENT_ID === 'placeholder-client-id') && (
                 <p className="text-xs text-muted-foreground">
-                  Configure Google OAuth credentials in <code className="bg-gray-100 px-1 rounded">.env</code> to enable this button.
+                  Configure Google OAuth credentials in <code className="bg-gray-100 px-1 rounded">.env</code> to enable Gmail connection.
                 </p>
               )}
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Email Sending (SMTP Fallback)</CardTitle>
+          <CardDescription>
+            Admin-configured SMTP - works for all users without setup
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+            <div className="flex items-start gap-2">
+              <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-medium text-blue-900">Automatic Fallback</p>
+                <p className="text-sm text-blue-800">
+                  If you don't connect Gmail, emails will automatically be sent via SMTP (configured by admin). 
+                  This ensures email sending always works, even without Gmail OAuth setup.
+                </p>
+                <div className="pt-2">
+                  <a 
+                    href="/docs/SMTP_SETUP.md" 
+                    target="_blank"
+                    className="text-xs text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
+                  >
+                    View SMTP setup guide (for admins)
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

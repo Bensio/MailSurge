@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { Inngest } from 'inngest';
-import { google } from 'googleapis';
 import { processEmailImages } from '../lib/image-processing';
 
 const supabase = createClient(
@@ -150,8 +149,12 @@ async function handleSendCampaign(
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-    return res.status(500).json({ error: 'Gmail OAuth not configured' });
+  // Check if at least one email method is configured
+  const hasSMTP = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+  const hasGmailOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI);
+  
+  if (!hasSMTP && !hasGmailOAuth) {
+    return res.status(500).json({ error: 'No email sending method configured. Please set up either SMTP (SMTP_USER, SMTP_PASSWORD) or Gmail OAuth (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI).' });
   }
 
   const { scheduled_at } = req.body || {};
@@ -169,13 +172,6 @@ async function handleSendCampaign(
 
   if (!campaign.contacts || campaign.contacts.length === 0) {
     return res.status(400).json({ error: 'No contacts in this campaign. Please add contacts before sending.' });
-  }
-
-  const accessToken = user.user_metadata?.gmail_token;
-  const refreshToken = user.user_metadata?.gmail_refresh_token;
-  
-  if (!accessToken || !refreshToken) {
-    return res.status(400).json({ error: 'Gmail not connected. Please connect your Gmail account in settings.' });
   }
 
   // If scheduled_at is provided and in the future, schedule the campaign
@@ -223,8 +219,6 @@ async function handleSendCampaign(
       data: {
         campaignId: id,
         userId: user.id,
-        accessToken: accessToken,
-        refreshToken: refreshToken,
       },
     });
     
@@ -253,8 +247,12 @@ async function handleTestSend(
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-    return res.status(500).json({ error: 'Gmail OAuth not configured' });
+  // Check if at least one email method is configured
+  const hasSMTP = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+  const hasGmailOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI);
+  
+  if (!hasSMTP && !hasGmailOAuth) {
+    return res.status(500).json({ error: 'No email sending method configured. Please set up either SMTP or Gmail OAuth.' });
   }
 
   let testEmails: string[] = [];
@@ -279,52 +277,6 @@ async function handleTestSend(
     return res.status(404).json({ error: 'Campaign not found' });
   }
 
-  const accessToken = user.user_metadata?.gmail_token;
-  const refreshToken = user.user_metadata?.gmail_refresh_token;
-  
-  if (!accessToken || !refreshToken) {
-    return res.status(400).json({ error: 'Gmail not connected. Please connect your Gmail account in Settings.' });
-  }
-
-  let redirectUri = process.env.GOOGLE_REDIRECT_URI;
-  if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
-    redirectUri = `https://${redirectUri}`;
-  }
-
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri
-  );
-
-  oauth2Client.setCredentials({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-
-  try {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    if (credentials.access_token) {
-      oauth2Client.setCredentials(credentials);
-      if (credentials.access_token !== accessToken) {
-        await supabase.auth.admin.updateUserById(user.id, {
-          user_metadata: {
-            ...user.user_metadata,
-            gmail_token: credentials.access_token,
-            gmail_token_expiry: credentials.expiry_date,
-          },
-        });
-      }
-    }
-  } catch (refreshError) {
-    console.error('Error refreshing token:', refreshError);
-  }
-
-  let senderEmail = campaign.from_email || user.email;
-  if (!senderEmail) {
-    return res.status(400).json({ error: 'Sender email not found' });
-  }
-
   let html = campaign.body_html || '';
   let text = campaign.body_text || '';
   let subject = campaign.subject || '';
@@ -346,35 +298,122 @@ async function handleTestSend(
   baseUrl = baseUrl.replace(/\/$/, '');
   html = processEmailImages(html, baseUrl);
 
-  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+  // Try Gmail OAuth first, fall back to SMTP
+  const accessToken = user.user_metadata?.gmail_token;
+  const refreshToken = user.user_metadata?.gmail_refresh_token;
+  let oauth2Client: any = null;
+  let senderEmail: string | null = null;
+
+  if (accessToken && refreshToken && hasGmailOAuth) {
+    try {
+      const { google } = await import('googleapis');
+      let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+      if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+        redirectUri = `https://${redirectUri}`;
+      }
+
+      oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri
+      );
+
+      oauth2Client.setCredentials({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      try {
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        if (credentials.access_token) {
+          oauth2Client.setCredentials(credentials);
+          if (credentials.access_token !== accessToken) {
+            await supabase.auth.admin.updateUserById(user.id, {
+              user_metadata: {
+                ...user.user_metadata,
+                gmail_token: credentials.access_token,
+                gmail_token_expiry: credentials.expiry_date,
+              },
+            });
+          }
+        }
+      } catch (refreshError) {
+        console.error('Error refreshing token:', refreshError);
+      }
+
+      senderEmail = campaign.from_email || user.email;
+      if (!senderEmail) {
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        const profile = await gmail.users.getProfile({ userId: 'me' });
+        senderEmail = profile.data.emailAddress || user.email || '';
+      }
+    } catch (oauthError) {
+      console.warn('Gmail OAuth setup failed for test send, using SMTP:', oauthError);
+      oauth2Client = null;
+    }
+  }
+
   const sentEmails: string[] = [];
   const errors: string[] = [];
 
   for (const testEmail of testEmails) {
     try {
-      const emailLines = [
-        `From: ${senderEmail}`,
-        `To: ${testEmail}`,
-        `Subject: ${subject}`,
-        'Content-Type: text/html; charset=utf-8',
-        'MIME-Version: 1.0',
-        '',
-        html || text,
-      ];
+      if (oauth2Client && senderEmail) {
+        // Use Gmail API
+        const { google } = await import('googleapis');
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        
+        const emailLines = [
+          `From: ${senderEmail}`,
+          `To: ${testEmail}`,
+          `Subject: ${subject}`,
+          'Content-Type: text/html; charset=utf-8',
+          'MIME-Version: 1.0',
+          '',
+          html || text,
+        ];
 
-      const email = emailLines.join('\r\n');
-      const encodedEmail = Buffer.from(email)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+        const email = emailLines.join('\r\n');
+        const encodedEmail = Buffer.from(email)
+          .toString('base64')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
 
-      await gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedEmail,
-        },
-      });
+        await gmail.users.messages.send({
+          userId: 'me',
+          requestBody: {
+            raw: encodedEmail,
+          },
+        });
+      } else {
+        // Use SMTP
+        const nodemailer = await import('nodemailer');
+        const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+        const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+        const smtpUser = process.env.SMTP_USER;
+        const smtpPassword = process.env.SMTP_PASSWORD;
+        const smtpSenderEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
+        const senderName = process.env.SMTP_FROM_NAME || 'MailSurge';
+
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPassword,
+          },
+        });
+
+        await transporter.sendMail({
+          from: `"${senderName}" <${smtpSenderEmail}>`,
+          to: testEmail,
+          subject: subject,
+          text: text,
+          html: html,
+        });
+      }
 
       sentEmails.push(testEmail);
     } catch (error) {
