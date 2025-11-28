@@ -12,12 +12,25 @@ const supabase = createClient(
  * This works with any email provider (Gmail, Outlook, etc.)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Set CORS headers to allow email clients to load the image
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const { token } = req.query;
 
   if (typeof token !== 'string' || !token) {
     // Return transparent pixel even if token is invalid (to avoid breaking email display)
+    console.warn('[Tracking] No token provided');
     return serveTransparentPixel(res);
   }
+
+  console.log(`[Tracking] Received tracking request for token: ${token.substring(0, 8)}...`);
 
   try {
     // First, check if this is a reminder email (reminder_queue)
@@ -65,9 +78,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (fetchError || !contact) {
       // Token not found in either table, but still return pixel to avoid breaking email
-      console.warn(`[Tracking] Token not found: ${token}`);
+      console.warn(`[Tracking] Token not found in contacts table: ${token.substring(0, 8)}...`, fetchError?.message || 'No contact found');
       return serveTransparentPixel(res);
     }
+
+    console.log(`[Tracking] Found contact ${contact.id} for token ${token.substring(0, 8)}...`);
 
     // Record the campaign email open
     const now = new Date().toISOString();

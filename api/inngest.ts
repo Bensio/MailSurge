@@ -33,11 +33,23 @@ async function sendEmail(
 
   // Inject tracking pixel if tracking token is provided
   if (trackingToken) {
-    // Get base URL from environment or construct from Vercel URL
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : process.env.NEXT_PUBLIC_APP_URL || 'https://mailsurge.vercel.app';
+    // Get base URL - prefer explicit env var, then Vercel URL, then fallback
+    let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
     
+    if (!baseUrl) {
+      // Use VERCEL_URL if available (but this might be a preview URL)
+      if (process.env.VERCEL_URL) {
+        baseUrl = `https://${process.env.VERCEL_URL}`;
+      } else {
+        // Fallback to production URL
+        baseUrl = 'https://mailsurge.vercel.app';
+      }
+    }
+    
+    // Ensure baseUrl doesn't have trailing slash
+    baseUrl = baseUrl.replace(/\/$/, '');
+    
+    console.log(`[Inngest] Injecting tracking pixel with baseUrl: ${baseUrl}, token: ${trackingToken.substring(0, 8)}...`);
     html = injectTrackingPixel(html, trackingToken, baseUrl);
   }
 
@@ -264,15 +276,22 @@ export const sendCampaignEmails = inngest.createFunction(
         try {
           // Generate tracking token for this email
           const trackingToken = generateTrackingToken();
+          console.log(`[Inngest] Generated tracking token for contact ${contact.id}: ${trackingToken.substring(0, 8)}...`);
 
           // Update to queued and store tracking token
-          await supabase
+          const { error: tokenUpdateError } = await supabase
             .from('contacts')
             .update({ 
               status: 'queued',
               tracking_token: trackingToken,
             })
             .eq('id', contact.id);
+          
+          if (tokenUpdateError) {
+            console.error(`[Inngest] Error storing tracking token for contact ${contact.id}:`, tokenUpdateError);
+          } else {
+            console.log(`[Inngest] Stored tracking token for contact ${contact.id}`);
+          }
 
           // Send email with tracking pixel
           await sendEmail(contact, campaign, oauth2Client, senderEmail, trackingToken);
