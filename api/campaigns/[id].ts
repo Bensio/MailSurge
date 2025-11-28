@@ -82,9 +82,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(404).json({ error: 'Campaign not found' });
       }
 
+      // Optimize: Only fetch needed contact fields
       const { data: contacts, error: contactsError } = await supabase
         .from('contacts')
-        .select('*')
+        .select('id, email, company, name, status, sent_at, error, campaign_id, user_id, opened_at, open_count, tracking_token')
         .eq('campaign_id', id)
         .order('email', { ascending: true });
 
@@ -152,6 +153,8 @@ async function handleSendCampaign(
     return res.status(500).json({ error: 'Gmail OAuth not configured' });
   }
 
+  const { scheduled_at } = req.body || {};
+
   const { data: campaign, error } = await supabase
     .from('campaigns')
     .select('*, contacts (*)')
@@ -163,6 +166,10 @@ async function handleSendCampaign(
     return res.status(404).json({ error: 'Campaign not found' });
   }
 
+  if (!campaign.contacts || campaign.contacts.length === 0) {
+    return res.status(400).json({ error: 'No contacts in this campaign. Please add contacts before sending.' });
+  }
+
   const accessToken = user.user_metadata?.gmail_token;
   const refreshToken = user.user_metadata?.gmail_refresh_token;
   
@@ -170,9 +177,36 @@ async function handleSendCampaign(
     return res.status(400).json({ error: 'Gmail not connected. Please connect your Gmail account in settings.' });
   }
 
+  // If scheduled_at is provided and in the future, schedule the campaign
+  if (scheduled_at) {
+    const scheduledDate = new Date(scheduled_at);
+    const now = new Date();
+    
+    if (scheduledDate <= now) {
+      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    }
+
+    // Schedule the campaign
+    await supabase
+      .from('campaigns')
+      .update({ 
+        scheduled_at: scheduled_at,
+        status: 'draft' // Keep as draft until scheduled time
+      })
+      .eq('id', id);
+
+    return res.status(200).json({ 
+      status: 'scheduled', 
+      scheduled_at: scheduled_at,
+      total: campaign.contacts?.length || 0,
+      message: `Campaign scheduled to send on ${new Date(scheduled_at).toLocaleString()}`
+    });
+  }
+
+  // Send immediately
   await supabase
     .from('campaigns')
-    .update({ status: 'sending', sent_at: new Date().toISOString() })
+    .update({ status: 'sending', sent_at: new Date().toISOString(), scheduled_at: null })
     .eq('id', id);
 
   if (!process.env.INNGEST_EVENT_KEY) {

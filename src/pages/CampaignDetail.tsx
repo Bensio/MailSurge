@@ -10,10 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw, Mail, Edit } from 'lucide-react';
+import { Send, Trash2, ArrowLeft, Plus, X, RotateCcw, Archive, RefreshCw, Mail, Edit, Calendar } from 'lucide-react';
+import { ScheduleDialog } from '@/components/campaigns/ScheduleDialog';
 import { formatDate, validateEmail } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
+import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { Contact } from '@/types';
 
 export function CampaignDetail() {
@@ -21,6 +24,7 @@ export function CampaignDetail() {
   const navigate = useNavigate();
   const { currentCampaign, loading, error, fetchCampaign, sendCampaign, testSend, deleteCampaign } = useCampaignStore();
   const { user } = useAuthStore();
+  const { toast } = useToast();
   const [showUpload, setShowUpload] = useState(false);
   const [showAddNew, setShowAddNew] = useState(false);
   const [showAddFromLibrary, setShowAddFromLibrary] = useState(false);
@@ -34,6 +38,7 @@ export function CampaignDetail() {
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -184,7 +189,12 @@ export function CampaignDetail() {
       if (insertError) {
         // If it's a duplicate (same email already in this campaign), that's okay
         if (insertError.code === '23505') {
-          alert('This contact already exists in this campaign');
+          toast({
+            title: 'Contact already exists',
+            description: 'This contact is already in this campaign.',
+            variant: 'destructive',
+          });
+          return;
         } else {
           throw insertError;
         }
@@ -195,10 +205,18 @@ export function CampaignDetail() {
         fetchCampaign(id);
       }
       fetchLibraryContacts();
+      toast({
+        title: 'Contact added',
+        description: 'The contact has been added to the campaign.',
+      });
     } catch (error) {
       logger.error('Error adding contact from library:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to add contact to campaign';
-      alert(`Error: ${errorMessage}`);
+      toast({
+        title: 'Error adding contact',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     } finally {
       setAddingContact(false);
     }
@@ -208,40 +226,77 @@ export function CampaignDetail() {
     if (!id) return;
     const testEmails = user?.user_metadata?.test_emails || [];
     if (testEmails.length === 0) {
-      alert('No test emails configured. Please add at least one test email in Settings first.');
+      toast({
+        title: 'No test emails configured',
+        description: 'Please add at least one test email in Settings first.',
+        variant: 'destructive',
+      });
       return;
     }
     try {
       const result = await testSend(id);
       const sentTo = result.testEmails.join(', ');
-      alert(`Test email sent successfully to ${sentTo}!`);
+      toast({
+        title: 'Test email sent',
+        description: `Successfully sent to ${sentTo}`,
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send test email';
-      alert(`Error: ${errorMessage}`);
+      toast({
+        title: 'Failed to send test email',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (scheduledAt?: string) => {
     if (!id) return;
     if (contacts.length === 0) {
-      alert('This campaign has no contacts. Please add contacts before sending.');
+      toast({
+        title: 'No contacts',
+        description: 'Please add contacts before sending the campaign.',
+        variant: 'destructive',
+      });
       return;
     }
-    if (!confirm(`Are you sure you want to send this campaign to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''}? This action cannot be undone.`)) {
+    
+    if (!scheduledAt && !confirm(`Are you sure you want to send this campaign to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''}? This action cannot be undone.`)) {
       return;
     }
+    
     try {
-      await sendCampaign(id);
+      await sendCampaign(id, scheduledAt);
       const delay = currentCampaign?.settings?.delay || 45;
       // Refresh immediately to get updated status
       if (id) {
         await fetchCampaign(id);
       }
-      alert(`Campaign sending started! Emails will be sent to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} with a ${delay} second delay between each. The page will auto-refresh to show progress.`);
+      
+      if (scheduledAt) {
+        const scheduledDate = new Date(scheduledAt);
+        toast({
+          title: 'Campaign scheduled',
+          description: `Campaign will be sent to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} on ${scheduledDate.toLocaleString()}.`,
+        });
+      } else {
+        toast({
+          title: 'Campaign sending started',
+          description: `Emails will be sent to ${contacts.length} contact${contacts.length !== 1 ? 's' : ''} with a ${delay} second delay between each.`,
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send campaign';
-      alert(`Error: ${errorMessage}`);
+      toast({
+        title: 'Failed to send campaign',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     }
+  };
+
+  const handleSchedule = (scheduledAt: string) => {
+    handleSend(scheduledAt);
   };
 
   const handleRetry = async () => {
@@ -253,7 +308,11 @@ export function CampaignDetail() {
     const totalToRetry = unsentContacts.length;
     
     if (totalToRetry === 0) {
-      alert('No contacts to retry. All contacts are already sent.');
+      toast({
+        title: 'No contacts to retry',
+        description: 'All contacts are already sent.',
+        variant: 'destructive',
+      });
       return;
     }
     
@@ -299,7 +358,10 @@ export function CampaignDetail() {
       // Now send the campaign
       await sendCampaign(id);
       const delay = currentCampaign?.settings?.delay || 45;
-      alert(`Campaign retry started! Emails will be sent to ${totalToRetry} contact${totalToRetry !== 1 ? 's' : ''} with a ${delay} second delay between each.`);
+      toast({
+        title: 'Campaign retry started',
+        description: `Emails will be sent to ${totalToRetry} contact${totalToRetry !== 1 ? 's' : ''} with a ${delay} second delay between each.`,
+      });
       
       // Refresh campaign data after a short delay
       setTimeout(() => {
@@ -309,7 +371,11 @@ export function CampaignDetail() {
       }, 1000);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to retry campaign';
-      alert(`Error: ${errorMessage}`);
+      toast({
+        title: 'Failed to retry campaign',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -333,9 +399,17 @@ export function CampaignDetail() {
       if (id) {
         fetchCampaign(id);
       }
+      toast({
+        title: 'Campaign archived',
+        description: 'The campaign has been archived successfully.',
+      });
     } catch (error) {
       logger.error('Error archiving campaign:', error);
-      alert('Failed to archive campaign');
+      toast({
+        title: 'Failed to archive campaign',
+        description: 'An error occurred while archiving the campaign.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -351,11 +425,19 @@ export function CampaignDetail() {
   const handleAddContact = async () => {
     if (!id || !user) return;
     if (!contactEmail || !contactCompany) {
-      alert('Please fill in both email and company');
+      toast({
+        title: 'Missing information',
+        description: 'Please fill in both email and company fields.',
+        variant: 'destructive',
+      });
       return;
     }
     if (!validateEmail(contactEmail)) {
-      alert('Please enter a valid email address');
+      toast({
+        title: 'Invalid email',
+        description: 'Please enter a valid email address.',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -384,9 +466,17 @@ export function CampaignDetail() {
       if (insertError) {
         logger.error('Error inserting contact:', insertError);
         if (insertError.code === '23505') {
-          alert('This contact already exists in this campaign');
+          toast({
+            title: 'Contact already exists',
+            description: 'This contact is already in this campaign.',
+            variant: 'destructive',
+          });
         } else {
-          alert(`Failed to add contact: ${insertError.message || 'Unknown error'}`);
+          toast({
+            title: 'Failed to add contact',
+            description: insertError.message || 'Unknown error occurred.',
+            variant: 'destructive',
+          });
           throw insertError;
         }
       } else {
@@ -399,10 +489,14 @@ export function CampaignDetail() {
         if (id) {
           fetchCampaign(id);
         }
+        toast({
+          title: 'Contact added',
+          description: 'The contact has been added to the campaign.',
+        });
       }
     } catch (error) {
       logger.error('Error adding contact:', error);
-      alert('Failed to add contact');
+      // Error toast already shown above
     } finally {
       setAddingContact(false);
     }
@@ -419,8 +513,39 @@ export function CampaignDetail() {
   // Show loading state
   if (loading && !currentCampaign && !error) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">Loading campaign...</div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-24" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-32 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-6 w-32" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-64 w-full" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -506,11 +631,20 @@ export function CampaignDetail() {
                 <Mail className="mr-2 h-4 w-4" />
                 Test Send
               </Button>
-              <Button onClick={handleSend} disabled={loading}>
+              <Button onClick={() => setShowScheduleDialog(true)} disabled={loading} variant="outline">
+                <Calendar className="mr-2 h-4 w-4" />
+                Schedule
+              </Button>
+              <Button onClick={() => handleSend()} disabled={loading}>
                 <Send className="mr-2 h-4 w-4" />
-                Send Campaign
+                Send Now
               </Button>
             </>
+          )}
+          {currentCampaign?.scheduled_at && (
+            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+              Scheduled: {new Date(currentCampaign.scheduled_at).toLocaleString()}
+            </Badge>
           )}
           {canRetry && (
             <Button onClick={handleRetry} disabled={loading} variant="outline">
@@ -789,6 +923,13 @@ export function CampaignDetail() {
           />
         </CardContent>
       </Card>
+
+      <ScheduleDialog
+        open={showScheduleDialog}
+        onOpenChange={setShowScheduleDialog}
+        onSchedule={handleSchedule}
+        contactCount={contacts.length}
+      />
     </div>
   );
 }

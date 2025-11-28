@@ -12,8 +12,8 @@ import { Settings } from '@/pages/Settings';
 import { Setup } from '@/pages/Setup';
 import { Contacts } from '@/pages/Contacts';
 import { CampaignList } from '@/components/campaigns/CampaignList';
-import { Reminders } from '@/pages/Reminders';
 import { NewReminder } from '@/pages/NewReminder';
+import { Scheduling } from '@/pages/Scheduling';
 import { Toaster } from '@/components/ui/toaster';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -147,7 +147,7 @@ export function App() {
           element={
             <ProtectedRoute>
               <AppLayout>
-                <Reminders />
+                <Scheduling />
               </AppLayout>
             </ProtectedRoute>
           }

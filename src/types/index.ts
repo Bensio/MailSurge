@@ -19,6 +19,7 @@ export interface Campaign {
   created_at: string;
   sent_at?: string | null;
   completed_at?: string | null;
+  scheduled_at?: string | null; // When campaign is scheduled to send
 }
 
 export interface Contact {

@@ -14,6 +14,7 @@ import { formatDate } from '@/lib/utils';
 import { Trash2, Mail, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
+import { useToast } from '@/hooks/use-toast';
 
 interface ContactsTableProps {
   contacts: Contact[];
@@ -52,6 +53,7 @@ export function ContactsTable({
   onSelectionChange,
 }: ContactsTableProps) {
   const [removing, setRemoving] = useState<string | null>(null);
+  const { toast } = useToast();
   
   const handleRemoveContact = async (contactId: string) => {
     if (!confirm('Remove this contact from the campaign? (The contact will remain in your library)')) {
@@ -59,6 +61,7 @@ export function ContactsTable({
     }
     
     setRemoving(contactId);
+    
     try {
       const { error } = await supabase
         .from('contacts')
@@ -72,9 +75,17 @@ export function ContactsTable({
       if (onContactRemoved) {
         onContactRemoved();
       }
+      toast({
+        title: 'Contact removed',
+        description: 'The contact has been removed from the campaign.',
+      });
     } catch (error) {
       logger.error('Error removing contact:', error);
-      alert('Failed to remove contact');
+      toast({
+        title: 'Failed to remove contact',
+        description: 'An error occurred while removing the contact.',
+        variant: 'destructive',
+      });
     } finally {
       setRemoving(null);
     }

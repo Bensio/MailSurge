@@ -13,7 +13,7 @@ interface CampaignState {
   createCampaign: (data: Omit<Campaign, 'id' | 'user_id' | 'created_at' | 'status'>) => Promise<Campaign>;
   updateCampaign: (id: string, data: Partial<Campaign>) => Promise<void>;
   deleteCampaign: (id: string) => Promise<void>;
-  sendCampaign: (id: string) => Promise<void>;
+  sendCampaign: (id: string, scheduledAt?: string) => Promise<void>;
   testSend: (id: string) => Promise<{ testEmails: string[] }>;
 }
 
@@ -112,7 +112,32 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       subject: data.subject,
       body_html_length: data.body_html?.length,
     });
-    set({ loading: true, error: null });
+    
+    // Optimistic update: create temporary campaign
+    const tempId = `temp-${Date.now()}`;
+    const tempCampaign: Campaign = {
+      id: tempId,
+      user_id: '',
+      name: data.name,
+      subject: data.subject,
+      body_html: data.body_html || '',
+      body_text: data.body_text || '',
+      from_email: data.from_email || null,
+      status: 'draft',
+      settings: data.settings || { delay: 45, ccEmail: null },
+      created_at: new Date().toISOString(),
+      sent_at: null,
+      completed_at: null,
+      design_json: data.design_json || null,
+    };
+    
+    // Optimistically add to list
+    set((state) => ({
+      campaigns: [...state.campaigns, tempCampaign],
+      loading: true,
+      error: null,
+    }));
+    
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns`, {
@@ -143,21 +168,43 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       
       const campaign = await response.json();
       logger.debug('campaignStore', 'Campaign created', { id: campaign.id });
+      
+      // Replace temp campaign with real one
       set((state) => ({
-        campaigns: [...state.campaigns, campaign],
+        campaigns: state.campaigns.map((c) => (c.id === tempId ? campaign : c)),
         loading: false,
       }));
       return campaign;
     } catch (error) {
       logger.error('Error in createCampaign:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ error: errorMessage, loading: false });
+      
+      // Rollback optimistic update
+      set((state) => ({
+        campaigns: state.campaigns.filter((c) => c.id !== tempId),
+        error: errorMessage,
+        loading: false,
+      }));
       throw error;
     }
   },
 
   updateCampaign: async (id: string, data: Partial<Campaign>) => {
-    set({ loading: true, error: null });
+    // Optimistic update
+    const previousCampaign = get().campaigns.find((c) => c.id === id);
+    const previousCurrentCampaign = get().currentCampaign;
+    
+    set((state) => ({
+      campaigns: state.campaigns.map((c) => 
+        c.id === id ? { ...c, ...data } : c
+      ),
+      currentCampaign: state.currentCampaign?.id === id
+        ? { ...state.currentCampaign, ...data } as CampaignWithContacts
+        : state.currentCampaign,
+      loading: true,
+      error: null,
+    }));
+    
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns/${id}`, {
@@ -176,12 +223,32 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       }));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ error: errorMessage, loading: false });
+      // Rollback optimistic update
+      set((state) => ({
+        campaigns: previousCampaign
+          ? state.campaigns.map((c) => (c.id === id ? previousCampaign : c))
+          : state.campaigns,
+        currentCampaign: previousCurrentCampaign,
+        error: errorMessage,
+        loading: false,
+      }));
+      throw error;
     }
   },
 
   deleteCampaign: async (id: string) => {
-    set({ loading: true, error: null });
+    // Optimistic update: store deleted campaign for rollback
+    const deletedCampaign = get().campaigns.find((c) => c.id === id);
+    const deletedCurrentCampaign = get().currentCampaign?.id === id ? get().currentCampaign : null;
+    
+    // Optimistically remove
+    set((state) => ({
+      campaigns: state.campaigns.filter((c) => c.id !== id),
+      currentCampaign: state.currentCampaign?.id === id ? null : state.currentCampaign,
+      loading: true,
+      error: null,
+    }));
+    
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns/${id}`, {
@@ -189,24 +256,46 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         headers,
       });
       if (!response.ok) throw new Error('Failed to delete campaign');
-      set((state) => ({
-        campaigns: state.campaigns.filter((c) => c.id !== id),
-        currentCampaign: state.currentCampaign?.id === id ? null : state.currentCampaign,
-        loading: false,
-      }));
+      set({ loading: false });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ error: errorMessage, loading: false });
+      // Rollback optimistic update
+      set((state) => ({
+        campaigns: deletedCampaign
+          ? [...state.campaigns, deletedCampaign]
+          : state.campaigns,
+        currentCampaign: deletedCurrentCampaign,
+        error: errorMessage,
+        loading: false,
+      }));
+      throw error;
     }
   },
 
-  sendCampaign: async (id: string) => {
-    set({ loading: true, error: null });
+  sendCampaign: async (id: string, scheduledAt?: string) => {
+    // Optimistic update: set status based on whether it's scheduled
+    const previousCampaign = get().campaigns.find((c) => c.id === id);
+    const previousCurrentCampaign = get().currentCampaign;
+    
+    const newStatus = scheduledAt ? 'draft' as const : 'sending' as const;
+    
+    set((state) => ({
+      campaigns: state.campaigns.map((c) => 
+        c.id === id ? { ...c, status: newStatus, scheduled_at: scheduledAt || null } : c
+      ),
+      currentCampaign: state.currentCampaign?.id === id
+        ? { ...state.currentCampaign, status: newStatus, scheduled_at: scheduledAt || null }
+        : state.currentCampaign,
+      loading: true,
+      error: null,
+    }));
+    
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/campaigns/${id}?action=send`, {
         method: 'POST',
         headers,
+        body: JSON.stringify({ scheduled_at: scheduledAt }),
       });
       if (!response.ok) {
         const errorData = await response.json();
@@ -215,7 +304,16 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       set({ loading: false });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      set({ error: errorMessage, loading: false });
+      // Rollback optimistic update
+      set((state) => ({
+        campaigns: previousCampaign
+          ? state.campaigns.map((c) => (c.id === id ? previousCampaign : c))
+          : state.campaigns,
+        currentCampaign: previousCurrentCampaign,
+        error: errorMessage,
+        loading: false,
+      }));
+      throw error;
     }
   },
 

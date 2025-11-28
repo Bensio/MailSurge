@@ -6,7 +6,7 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/campaigns', label: 'Campaigns', icon: Mail },
   { path: '/contacts', label: 'Contacts', icon: Users },
-  { path: '/reminders', label: 'Reminders', icon: Clock },
+  { path: '/reminders', label: 'Scheduling', icon: Clock },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 

@@ -46,9 +46,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // GET /api/campaigns - List campaigns
   if (req.method === 'GET') {
     try {
+      // Optimize: Don't fetch large body fields for list view
       const { data: campaigns, error } = await supabase
         .from('campaigns')
-        .select('*')
+        .select('id, user_id, name, subject, from_email, status, settings, created_at, sent_at, completed_at, design_json')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 

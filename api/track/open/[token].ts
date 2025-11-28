@@ -20,7 +20,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Find contact by tracking token
+    // First, check if this is a reminder email (reminder_queue)
+    const { data: reminder, error: reminderError } = await supabase
+      .from('reminder_queue')
+      .select('id, opened_at, open_count, contact_id')
+      .eq('tracking_token', token)
+      .single();
+
+    if (reminder && !reminderError) {
+      // This is a reminder email open
+      const now = new Date().toISOString();
+      const updateData: {
+        open_count: number;
+        opened_at?: string;
+      } = {
+        open_count: (reminder.open_count || 0) + 1,
+      };
+
+      // Only set opened_at on first open
+      if (!reminder.opened_at) {
+        updateData.opened_at = now;
+      }
+
+      const { error: updateError } = await supabase
+        .from('reminder_queue')
+        .update(updateData)
+        .eq('id', reminder.id);
+
+      if (updateError) {
+        console.error(`[Tracking] Error updating reminder ${reminder.id}:`, updateError);
+      } else {
+        console.log(`[Tracking] Recorded reminder open for ${reminder.id} (count: ${updateData.open_count})`);
+      }
+
+      return serveTransparentPixel(res);
+    }
+
+    // If not a reminder, check if it's a campaign email (contacts)
     const { data: contact, error: fetchError } = await supabase
       .from('contacts')
       .select('id, opened_at, open_count')
@@ -28,12 +64,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .single();
 
     if (fetchError || !contact) {
-      // Token not found, but still return pixel to avoid breaking email
+      // Token not found in either table, but still return pixel to avoid breaking email
       console.warn(`[Tracking] Token not found: ${token}`);
       return serveTransparentPixel(res);
     }
 
-    // Record the open
+    // Record the campaign email open
     const now = new Date().toISOString();
     const updateData: {
       open_count: number;
@@ -55,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (updateError) {
       console.error(`[Tracking] Error updating contact ${contact.id}:`, updateError);
     } else {
-      console.log(`[Tracking] Recorded open for contact ${contact.id} (count: ${updateData.open_count})`);
+      console.log(`[Tracking] Recorded campaign open for contact ${contact.id} (count: ${updateData.open_count})`);
     }
 
     // Return transparent pixel

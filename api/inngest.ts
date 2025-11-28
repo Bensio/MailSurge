@@ -539,11 +539,8 @@ export const processReminders = inngest.createFunction(
           // Generate tracking token for reminder email
           const reminderTrackingToken = generateTrackingToken();
           
-          // Store tracking token for reminder
-          await supabase
-            .from('contacts')
-            .update({ tracking_token: reminderTrackingToken })
-            .eq('id', contact.id);
+          // Store tracking token in reminder_queue (NOT in contacts - that's for campaign emails)
+          // This allows us to distinguish between campaign opens and reminder opens
 
           // Send reminder email using existing sendEmail function
           await sendEmail(
@@ -559,13 +556,14 @@ export const processReminders = inngest.createFunction(
             reminderTrackingToken
           );
 
-          // Update queue status
+          // Update queue status with tracking token
           await supabase
             .from('reminder_queue')
             .update({ 
               status: 'sent', 
               sent_at: new Date().toISOString(),
-              reminder_count: (reminder.reminder_count || 0) + 1
+              reminder_count: (reminder.reminder_count || 0) + 1,
+              tracking_token: reminderTrackingToken
             })
             .eq('id', reminder.id);
 
@@ -584,6 +582,102 @@ export const processReminders = inngest.createFunction(
     }
 
     return { processed: reminders.length };
+  }
+);
+
+// Function to process scheduled campaigns
+export const processScheduledCampaigns = inngest.createFunction(
+  { id: 'process-scheduled-campaigns', name: 'Process Scheduled Campaigns' },
+  { cron: '*/5 * * * *' }, // Run every 5 minutes
+  async ({ step }) => {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // Get campaigns scheduled to send now or in the past
+    const now = new Date().toISOString();
+    const { data: scheduledCampaigns, error } = await supabase
+      .from('campaigns')
+      .select('*, user_id')
+      .not('scheduled_at', 'is', null)
+      .lte('scheduled_at', now)
+      .eq('status', 'draft')
+      .limit(50);
+
+    if (error) {
+      console.error('[Inngest Scheduled] Error fetching scheduled campaigns:', error);
+      return;
+    }
+
+    if (!scheduledCampaigns || scheduledCampaigns.length === 0) {
+      console.log('[Inngest Scheduled] No scheduled campaigns to process');
+      return;
+    }
+
+    console.log(`[Inngest Scheduled] Processing ${scheduledCampaigns.length} scheduled campaigns`);
+
+    for (const campaign of scheduledCampaigns) {
+      await step.run(`send-scheduled-campaign-${campaign.id}`, async () => {
+        try {
+          // Get user's Gmail tokens
+          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(campaign.user_id);
+          
+          if (userError || !userData?.user) {
+            console.error(`[Inngest Scheduled] Error getting user ${campaign.user_id}:`, userError);
+            await supabase
+              .from('campaigns')
+              .update({ status: 'failed', scheduled_at: null })
+              .eq('id', campaign.id);
+            return;
+          }
+
+          const user = userData.user;
+          const accessToken = user.user_metadata?.gmail_token;
+          const refreshToken = user.user_metadata?.gmail_refresh_token;
+
+          if (!accessToken || !refreshToken) {
+            console.error(`[Inngest Scheduled] Missing Gmail tokens for user ${campaign.user_id}`);
+            await supabase
+              .from('campaigns')
+              .update({ status: 'failed', scheduled_at: null })
+              .eq('id', campaign.id);
+            return;
+          }
+
+          // Trigger the campaign send
+          await inngest.send({
+            name: 'campaign/send',
+            data: {
+              campaignId: campaign.id,
+              userId: campaign.user_id,
+              accessToken: accessToken,
+              refreshToken: refreshToken,
+            },
+          });
+
+          // Clear scheduled_at and update status
+          await supabase
+            .from('campaigns')
+            .update({ 
+              status: 'sending',
+              sent_at: new Date().toISOString(),
+              scheduled_at: null
+            })
+            .eq('id', campaign.id);
+
+          console.log(`[Inngest Scheduled] Triggered scheduled campaign ${campaign.id}`);
+        } catch (error) {
+          console.error(`[Inngest Scheduled] Error processing campaign ${campaign.id}:`, error);
+          await supabase
+            .from('campaigns')
+            .update({ status: 'failed', scheduled_at: null })
+            .eq('id', campaign.id);
+        }
+      });
+    }
+
+    return { processed: scheduledCampaigns.length };
   }
 );
 
@@ -725,7 +819,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Inngest serve function for Vercel
     const serveHandler = new InngestCommHandler({
       client: inngest,
-      functions: [sendCampaignEmails, processReminders],
+      functions: [sendCampaignEmails, processReminders, processScheduledCampaigns],
       signingKey: process.env.INNGEST_SIGNING_KEY,
       frameworkName: 'vercel',
       serveHost: baseUrl,
