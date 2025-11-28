@@ -14,12 +14,17 @@ function getSupabaseClient() {
   );
 }
 
-// Removed - now created inside handler
-// const inngest = new Inngest({ 
-  id: 'mailsurge',
-  name: 'MailSurge',
-  eventKey: process.env.INNGEST_EVENT_KEY,
-});
+// Initialize Inngest client - lazy initialization
+function getInngestClient() {
+  if (!process.env.INNGEST_EVENT_KEY) {
+    throw new Error('Inngest configuration missing');
+  }
+  return new Inngest({ 
+    id: 'mailsurge',
+    name: 'MailSurge',
+    eventKey: process.env.INNGEST_EVENT_KEY,
+  });
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Wrap everything in try-catch to catch any unhandled errors
