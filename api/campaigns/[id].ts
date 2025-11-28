@@ -40,7 +40,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid campaign ID' });
     }
 
-    try {
     // Get user from auth header
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -209,6 +208,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
+    } catch (innerError) {
+      // This catch block handles errors in the main handler logic
+      console.error('[Campaign Detail] Inner error:', innerError);
+      const errorMessage = innerError instanceof Error ? innerError.message : 'Unknown error';
+      return res.status(500).json({ 
+        error: 'Internal server error', 
+        details: errorMessage 
+      });
+    }
   } catch (error) {
     // This catch block handles any errors that occur outside the method-specific handlers
     console.error('[Campaign Detail] Unexpected error:', error);
