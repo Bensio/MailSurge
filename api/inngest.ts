@@ -21,7 +21,6 @@ async function sendEmail(
   },
   oauth2Client: any,
   senderEmail: string,
-  supabase: ReturnType<typeof createClient>,
   trackingToken?: string
 ) {
   // Personalize email
@@ -276,7 +275,7 @@ export const sendCampaignEmails = inngest.createFunction(
             .eq('id', contact.id);
 
           // Send email with tracking pixel
-          await sendEmail(contact, campaign, oauth2Client, senderEmail, supabase, trackingToken);
+          await sendEmail(contact, campaign, oauth2Client, senderEmail, trackingToken);
 
           // Update to sent
           await supabase
@@ -557,7 +556,6 @@ export const processReminders = inngest.createFunction(
             },
             oauth2Client,
             senderEmail,
-            supabase,
             reminderTrackingToken
           );
 
