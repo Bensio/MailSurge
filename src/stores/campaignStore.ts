@@ -27,7 +27,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   return {
     'Authorization': `Bearer ${session.access_token}`,
     'Content-Type': 'application/json',
-  };
+  } as HeadersInit;
 }
 
 export const useCampaignStore = create<CampaignState>((set, get) => ({
@@ -62,10 +62,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         // Try to parse error message from response
         try {
           const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch {
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (parseError) {
           // If response isn't JSON, use status text
-          errorMessage = `${response.status}: ${response.statusText}`;
+          const statusText = response.statusText || 'Unknown error';
+          errorMessage = `${response.status}: ${statusText}`;
         }
         
         // Handle 404 specifically - don't log these as they're expected

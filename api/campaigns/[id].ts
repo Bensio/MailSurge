@@ -100,17 +100,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // Don't fail the request if contacts can't be fetched, just log it
         }
 
-        return res.status(200).json({
-          ...campaignData,
-          contacts: contacts || [],
-        });
+        // Ensure we have valid data before returning
+        if (!campaignData) {
+          console.error('[GET Campaign] Campaign data is null after fetch');
+          return res.status(404).json({ error: 'Campaign not found' });
+        }
+
+        try {
+          return res.status(200).json({
+            ...campaignData,
+            contacts: contacts || [],
+          });
+        } catch (jsonError) {
+          console.error('[GET Campaign] Error serializing response:', jsonError);
+          return res.status(500).json({ 
+            error: 'Internal server error', 
+            details: 'Failed to serialize response' 
+          });
+        }
       } catch (getError) {
         console.error('[GET Campaign] Unexpected error:', getError);
         const errorMessage = getError instanceof Error ? getError.message : 'Unknown error';
-        return res.status(500).json({ 
-          error: 'Internal server error', 
-          details: errorMessage 
-        });
+        const errorStack = getError instanceof Error ? getError.stack : undefined;
+        console.error('[GET Campaign] Error stack:', errorStack);
+        
+        // Ensure we return a proper JSON response even on error
+        try {
+          return res.status(500).json({ 
+            error: 'Internal server error', 
+            details: errorMessage 
+          });
+        } catch (responseError) {
+          console.error('[GET Campaign] Failed to send error response:', responseError);
+          // Last resort - try to send a plain text response
+          res.status(500).end('Internal server error');
+        }
       }
     }
 
@@ -148,15 +172,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
+    // This catch block handles any errors that occur outside the method-specific handlers
     console.error('[Campaign Detail] Unexpected error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const errorStack = error instanceof Error ? error.stack : undefined;
     console.error('[Campaign Detail] Error stack:', errorStack);
-    return res.status(500).json({ 
-      error: 'Internal server error', 
-      details: errorMessage,
-      ...(process.env.NODE_ENV === 'development' && { stack: errorStack })
-    });
+    
+    // Ensure we always return a proper JSON response
+    try {
+      return res.status(500).json({ 
+        error: 'Internal server error', 
+        details: errorMessage,
+        ...(process.env.NODE_ENV === 'development' && { stack: errorStack })
+      });
+    } catch (responseError) {
+      console.error('[Campaign Detail] Failed to send error response:', responseError);
+      // Last resort - try to send a plain text response
+      if (!res.headersSent) {
+        res.status(500).end('Internal server error');
+      }
+    }
   }
 }
 
