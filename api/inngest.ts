@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { google } from 'googleapis';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { generateTrackingToken, injectTrackingPixel } from './lib/tracking';
+import { processEmailImages } from './lib/image-processing';
 
 // Initialize Inngest client for the serve endpoint
 const inngest = new Inngest({ 
@@ -30,6 +31,21 @@ async function sendEmail(
   // Replace {{company}} with actual company name
   html = html.replace(/\{\{company\}\}/g, contact.company);
   subject = subject.replace(/\{\{company\}\}/g, contact.company);
+
+  // Process images to ensure all use absolute URLs
+  // Get base URL for image processing
+  let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl) {
+    if (process.env.VERCEL_URL) {
+      baseUrl = `https://${process.env.VERCEL_URL}`;
+    } else {
+      baseUrl = 'https://mailsurge.vercel.app';
+    }
+  }
+  baseUrl = baseUrl.replace(/\/$/, '');
+  
+  // Process images to convert relative URLs to absolute
+  html = processEmailImages(html, baseUrl);
 
   // Inject tracking pixel if tracking token is provided
   if (trackingToken) {

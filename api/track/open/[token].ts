@@ -123,17 +123,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  */
 function serveTransparentPixel(res: VercelResponse) {
   // 1x1 transparent PNG (base64 encoded)
+  // This is a valid PNG that email clients can load
   const pixel = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
     'base64'
   );
 
+  // Set headers to ensure the image loads properly
   res.setHeader('Content-Type', 'image/png');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Length', pixel.length.toString());
   
-  return res.send(pixel);
+  // Return 200 OK to ensure email clients don't block it
+  return res.status(200).send(pixel);
 }
 

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { Inngest } from 'inngest';
 import { google } from 'googleapis';
+import { processEmailImages } from '../lib/image-processing';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -332,6 +333,18 @@ async function handleTestSend(
   text = text.replace(/\{\{company\}\}/g, 'Test Company');
   subject = subject.replace(/\{\{company\}\}/g, 'Test Company');
   subject = `[TEST] ${subject}`;
+
+  // Process images to ensure all use absolute URLs
+  let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl) {
+    if (process.env.VERCEL_URL) {
+      baseUrl = `https://${process.env.VERCEL_URL}`;
+    } else {
+      baseUrl = 'https://mailsurge.vercel.app';
+    }
+  }
+  baseUrl = baseUrl.replace(/\/$/, '');
+  html = processEmailImages(html, baseUrl);
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   const sentEmails: string[] = [];
