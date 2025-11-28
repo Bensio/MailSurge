@@ -2,6 +2,7 @@ import { Inngest, InngestCommHandler } from 'inngest';
 import { createClient } from '@supabase/supabase-js';
 import { google } from 'googleapis';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { generateTrackingToken, injectTrackingPixel } from './lib/tracking';
 
 // Initialize Inngest client for the serve endpoint
 const inngest = new Inngest({ 
@@ -19,7 +20,9 @@ async function sendEmail(
     settings: { delay?: number; ccEmail?: string | null };
   },
   oauth2Client: any,
-  senderEmail: string
+  senderEmail: string,
+  supabase: ReturnType<typeof createClient>,
+  trackingToken?: string
 ) {
   // Personalize email
   let html = campaign.body_html;
@@ -28,6 +31,16 @@ async function sendEmail(
   // Replace {{company}} with actual company name
   html = html.replace(/\{\{company\}\}/g, contact.company);
   subject = subject.replace(/\{\{company\}\}/g, contact.company);
+
+  // Inject tracking pixel if tracking token is provided
+  if (trackingToken) {
+    // Get base URL from environment or construct from Vercel URL
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : process.env.NEXT_PUBLIC_APP_URL || 'https://mailsurge.vercel.app';
+    
+    html = injectTrackingPixel(html, trackingToken, baseUrl);
+  }
 
   // Create email
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -250,14 +263,20 @@ export const sendCampaignEmails = inngest.createFunction(
       
       await step.run(`send-email-${i}`, async () => {
         try {
-          // Update to queued
+          // Generate tracking token for this email
+          const trackingToken = generateTrackingToken();
+
+          // Update to queued and store tracking token
           await supabase
             .from('contacts')
-            .update({ status: 'queued' })
+            .update({ 
+              status: 'queued',
+              tracking_token: trackingToken,
+            })
             .eq('id', contact.id);
 
-          // Send email
-          await sendEmail(contact, campaign, oauth2Client, senderEmail);
+          // Send email with tracking pixel
+          await sendEmail(contact, campaign, oauth2Client, senderEmail, supabase, trackingToken);
 
           // Update to sent
           await supabase
@@ -518,6 +537,15 @@ export const processReminders = inngest.createFunction(
           const profile = await gmail.users.getProfile({ userId: 'me' });
           const senderEmail = profile.data.emailAddress || user.email || '';
 
+          // Generate tracking token for reminder email
+          const reminderTrackingToken = generateTrackingToken();
+          
+          // Store tracking token for reminder
+          await supabase
+            .from('contacts')
+            .update({ tracking_token: reminderTrackingToken })
+            .eq('id', contact.id);
+
           // Send reminder email using existing sendEmail function
           await sendEmail(
             { email: contact.email, company: contact.company, id: contact.id },
@@ -528,7 +556,9 @@ export const processReminders = inngest.createFunction(
               settings: reminderCampaign.settings || { delay: 45 },
             },
             oauth2Client,
-            senderEmail
+            senderEmail,
+            supabase,
+            reminderTrackingToken
           );
 
           // Update queue status

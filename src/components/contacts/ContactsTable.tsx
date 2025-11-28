@@ -11,7 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatDate } from '@/lib/utils';
-import { Trash2, Mail } from 'lucide-react';
+import { Trash2, Mail, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
 
@@ -130,6 +130,7 @@ export function ContactsTable({
             {showCampaign && <TableHead>Campaign</TableHead>}
             <TableHead>Status</TableHead>
             <TableHead>Sent At</TableHead>
+            <TableHead>Opened</TableHead>
             <TableHead>Error</TableHead>
             {(campaignId || onSelectionChange) && <TableHead>Actions</TableHead>}
           </TableRow>
@@ -187,6 +188,25 @@ export function ContactsTable({
                 </TableCell>
                 <TableCell>
                   {contact.sent_at ? formatDate(contact.sent_at) : '-'}
+                </TableCell>
+                <TableCell>
+                  {contact.opened_at ? (
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-green-600" />
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-green-600">
+                          {contact.open_count || 1}x
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(contact.opened_at)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : contact.status === 'sent' ? (
+                    <span className="text-muted-foreground text-sm">Not opened</span>
+                  ) : (
+                    '-'
+                  )}
                 </TableCell>
                 <TableCell className="text-sm text-destructive max-w-xs truncate">
                   {contact.error || '-'}

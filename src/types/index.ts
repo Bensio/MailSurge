@@ -32,6 +32,10 @@ export interface Contact {
   status: ContactStatus;
   sent_at?: string | null;
   error?: string | null;
+  // Email tracking fields
+  opened_at?: string | null; // Timestamp of first open
+  open_count?: number; // Total number of opens
+  tracking_token?: string | null; // Unique token for tracking pixel
 }
 
 export interface Template {
