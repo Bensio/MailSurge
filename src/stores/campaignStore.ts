@@ -115,7 +115,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/campaigns/create`, {
+      const response = await fetch(`${API_BASE}/campaigns`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
@@ -204,7 +204,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/campaigns/${id}/send`, {
+      const response = await fetch(`${API_BASE}/campaigns/${id}?action=send`, {
         method: 'POST',
         headers,
       });
@@ -223,7 +223,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/campaigns/${id}/test-send`, {
+      const response = await fetch(`${API_BASE}/campaigns/${id}?action=test-send`, {
         method: 'POST',
         headers,
       });

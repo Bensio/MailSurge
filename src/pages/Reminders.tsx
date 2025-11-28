@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Clock, Mail, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface ReminderRule {
   id: string;
@@ -36,6 +37,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 export function Reminders() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [rules, setRules] = useState<ReminderRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +71,11 @@ export function Reminders() {
   };
 
   const handleToggleActive = async (ruleId: string, currentStatus: boolean) => {
+    // Optimistic update
+    setRules(prev => prev.map(rule => 
+      rule.id === ruleId ? { ...rule, is_active: !currentStatus } : rule
+    ));
+
     try {
       const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/reminders/rules?id=${ruleId}`, {
@@ -81,18 +88,38 @@ export function Reminders() {
         throw new Error('Failed to update rule');
       }
       
-      // Refresh rules
+      // Refresh rules to ensure consistency
       await fetchRules();
+      
+      toast({
+        title: 'Rule updated',
+        description: `Reminder rule ${!currentStatus ? 'activated' : 'deactivated'}`,
+        variant: 'success',
+      });
     } catch (err) {
+      // Revert optimistic update
+      setRules(prev => prev.map(rule => 
+        rule.id === ruleId ? { ...rule, is_active: currentStatus } : rule
+      ));
+      
       console.error('Error toggling rule:', err);
-      alert('Failed to update rule. Please try again.');
+      toast({
+        title: 'Failed to update rule',
+        description: 'Please try again',
+        variant: 'destructive',
+      });
     }
   };
 
   const handleDelete = async (ruleId: string) => {
-    if (!confirm('Are you sure you want to delete this reminder rule?')) {
+    const rule = rules.find(r => r.id === ruleId);
+    if (!confirm(`Are you sure you want to delete "${rule?.name || 'this reminder rule'}"? This cannot be undone.`)) {
       return;
     }
+    
+    // Optimistic update
+    const originalRules = [...rules];
+    setRules(prev => prev.filter(rule => rule.id !== ruleId));
     
     try {
       const headers = await getAuthHeaders();
@@ -105,11 +132,20 @@ export function Reminders() {
         throw new Error('Failed to delete rule');
       }
       
-      // Refresh rules
-      await fetchRules();
+      toast({
+        title: 'Rule deleted',
+        description: 'Reminder rule has been removed',
+        variant: 'success',
+      });
     } catch (err) {
+      // Revert optimistic update
+      setRules(originalRules);
       console.error('Error deleting rule:', err);
-      alert('Failed to delete rule. Please try again.');
+      toast({
+        title: 'Failed to delete rule',
+        description: 'Please try again',
+        variant: 'destructive',
+      });
     }
   };
 

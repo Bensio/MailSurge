@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -23,6 +24,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 
 export function NewReminder() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { campaigns, fetchCampaigns } = useCampaignStore();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -80,12 +82,22 @@ export function NewReminder() {
         throw new Error(errorData.error || 'Failed to create reminder rule');
       }
 
-      // Success - navigate back to reminders page
+      // Success - show toast and navigate
+      toast({
+        title: 'Reminder rule created',
+        description: 'Your reminder rule has been set up successfully',
+        variant: 'success',
+      });
       navigate('/reminders');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setErrors({ submit: errorMessage });
       console.error('Error creating reminder rule:', error);
+      toast({
+        title: 'Failed to create rule',
+        description: errorMessage,
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }

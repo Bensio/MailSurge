@@ -14,6 +14,7 @@ import { Contacts } from '@/pages/Contacts';
 import { CampaignList } from '@/components/campaigns/CampaignList';
 import { Reminders } from '@/pages/Reminders';
 import { NewReminder } from '@/pages/NewReminder';
+import { Toaster } from '@/components/ui/toaster';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, initialized } = useAuthStore();
@@ -43,6 +44,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }
