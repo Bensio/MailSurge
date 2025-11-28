@@ -65,21 +65,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // GET /api/campaigns/[id] - Get campaign
     if (req.method === 'GET') {
       try {
+        console.log('[GET Campaign] Fetching campaign:', { id, userId: user.id });
+        
+        // Explicitly select columns to avoid issues with missing columns
         const { data: campaignData, error: campaignError } = await supabase
           .from('campaigns')
-          .select('*')
+          .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at, design_json')
           .eq('id', id)
           .eq('user_id', user.id)
           .single();
 
         if (campaignError) {
-          console.error('[GET Campaign] Database error:', campaignError);
+          console.error('[GET Campaign] Database error:', {
+            code: campaignError.code,
+            message: campaignError.message,
+            details: campaignError.details,
+            hint: campaignError.hint
+          });
           if (campaignError.code === 'PGRST116' || campaignError.message?.includes('No rows')) {
             return res.status(404).json({ error: 'Campaign not found' });
           }
           return res.status(500).json({ 
             error: 'Failed to fetch campaign', 
-            details: campaignError.message,
+            details: campaignError.message || 'Database query failed',
             code: campaignError.code 
           });
         }
@@ -107,15 +115,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         try {
-          return res.status(200).json({
+          console.log('[GET Campaign] Successfully fetched campaign:', { 
+            campaignId: campaignData?.id, 
+            contactCount: contacts?.length || 0 
+          });
+          
+          const response = {
             ...campaignData,
             contacts: contacts || [],
-          });
+          };
+          
+          return res.status(200).json(response);
         } catch (jsonError) {
           console.error('[GET Campaign] Error serializing response:', jsonError);
+          const errorMessage = jsonError instanceof Error ? jsonError.message : 'Unknown serialization error';
           return res.status(500).json({ 
             error: 'Internal server error', 
-            details: 'Failed to serialize response' 
+            details: `Failed to serialize response: ${errorMessage}` 
           });
         }
       } catch (getError) {
