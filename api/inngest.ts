@@ -314,6 +314,77 @@ export const sendCampaignEmails = inngest.createFunction(
       return { sentCount, failedCount, finalStatus };
     });
 
+    // Schedule reminders if campaign completed successfully
+    await step.run('schedule-reminders', async () => {
+      const { data: campaign } = await supabase
+        .from('campaigns')
+        .select('status')
+        .eq('id', campaignId)
+        .single();
+
+      // Only schedule reminders if campaign completed (not failed)
+      if (campaign?.status === 'completed') {
+        // Get reminder rules for this campaign
+        const { data: rules } = await supabase
+          .from('reminder_rules')
+          .select('*')
+          .eq('source_campaign_id', campaignId)
+          .eq('is_active', true);
+
+        if (rules && rules.length > 0) {
+          console.log(`[Inngest] Found ${rules.length} reminder rule(s) for campaign ${campaignId}`);
+          
+          // Schedule reminders for each rule
+          for (const rule of rules) {
+            // Get contacts from source campaign that were sent
+            const { data: contacts } = await supabase
+              .from('contacts')
+              .select('*')
+              .eq('campaign_id', rule.source_campaign_id)
+              .eq('status', 'sent');
+
+            if (!contacts || contacts.length === 0) {
+              console.log(`[Inngest] No sent contacts found for reminder rule ${rule.id}`);
+              continue;
+            }
+
+            // Calculate scheduled time based on trigger type
+            const scheduledFor = new Date();
+            
+            if (rule.trigger_type === 'days_after_campaign') {
+              scheduledFor.setDate(scheduledFor.getDate() + rule.trigger_value);
+            } else if (rule.trigger_type === 'days_after_last_email') {
+              // Use campaign completion time + trigger_value
+              scheduledFor.setDate(scheduledFor.getDate() + rule.trigger_value);
+            } else if (rule.trigger_type === 'no_response') {
+              scheduledFor.setDate(scheduledFor.getDate() + rule.trigger_value);
+            }
+
+            // Create queue entries
+            const queueEntries = contacts.map(contact => ({
+              user_id: userId,
+              contact_id: contact.id,
+              reminder_rule_id: rule.id,
+              campaign_id: rule.reminder_campaign_id,
+              scheduled_for: scheduledFor.toISOString(),
+              status: 'pending',
+              reminder_count: 0,
+            }));
+
+            const { error: queueError } = await supabase
+              .from('reminder_queue')
+              .insert(queueEntries);
+            
+            if (queueError) {
+              console.error(`[Inngest] Error scheduling reminders for rule ${rule.id}:`, queueError);
+            } else {
+              console.log(`[Inngest] Scheduled ${queueEntries.length} reminders for rule ${rule.id}`);
+            }
+          }
+        }
+      }
+    });
+
       return { 
         message: 'Campaign sending completed',
         sentCount,
@@ -329,6 +400,163 @@ export const sendCampaignEmails = inngest.createFunction(
       });
       throw error; // Re-throw to let Inngest handle retries
     }
+  }
+);
+
+// Function to process pending reminders
+export const processReminders = inngest.createFunction(
+  { id: 'process-reminders', name: 'Process Reminder Queue' },
+  { cron: '*/15 * * * *' }, // Run every 15 minutes
+  async ({ step }) => {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // Get pending reminders due now
+    const { data: reminders, error } = await supabase
+      .from('reminder_queue')
+      .select('*, reminder_rules(*), contacts(*), campaigns(*)')
+      .eq('status', 'pending')
+      .lte('scheduled_for', new Date().toISOString())
+      .limit(50); // Process 50 at a time
+
+    if (error) {
+      console.error('[Inngest Reminders] Error fetching reminders:', error);
+      return;
+    }
+
+    if (!reminders || reminders.length === 0) {
+      console.log('[Inngest Reminders] No pending reminders to process');
+      return;
+    }
+
+    console.log(`[Inngest Reminders] Processing ${reminders.length} reminders`);
+
+    for (const reminder of reminders) {
+      await step.run(`send-reminder-${reminder.id}`, async () => {
+        try {
+          // Get user's Gmail tokens
+          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(reminder.user_id);
+          
+          if (userError || !userData?.user) {
+            console.error(`[Inngest Reminders] Error getting user ${reminder.user_id}:`, userError);
+            await supabase
+              .from('reminder_queue')
+              .update({ status: 'failed' })
+              .eq('id', reminder.id);
+            return;
+          }
+
+          const user = userData.user;
+          const accessToken = user.user_metadata?.gmail_token;
+          const refreshToken = user.user_metadata?.gmail_refresh_token;
+
+          if (!accessToken || !refreshToken) {
+            console.error(`[Inngest Reminders] Missing Gmail tokens for user ${reminder.user_id}`);
+            await supabase
+              .from('reminder_queue')
+              .update({ status: 'failed' })
+              .eq('id', reminder.id);
+            return;
+          }
+
+          // Set up OAuth client
+          const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_REDIRECT_URI
+          );
+
+          oauth2Client.setCredentials({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          // Refresh token if needed
+          if (user.user_metadata?.gmail_token_expiry) {
+            const expiry = new Date(user.user_metadata.gmail_token_expiry);
+            if (expiry < new Date()) {
+              const { credentials } = await oauth2Client.refreshAccessToken();
+              oauth2Client.setCredentials(credentials);
+              
+              // Update tokens in database
+              await supabase.auth.admin.updateUserById(reminder.user_id, {
+                user_metadata: {
+                  ...user.user_metadata,
+                  gmail_token: credentials.access_token,
+                  gmail_token_expiry: credentials.expiry_date,
+                },
+              });
+            }
+          }
+
+          // Get reminder campaign details
+          const reminderCampaign = reminder.campaigns as any;
+          if (!reminderCampaign) {
+            console.error(`[Inngest Reminders] Reminder campaign not found for reminder ${reminder.id}`);
+            await supabase
+              .from('reminder_queue')
+              .update({ status: 'failed' })
+              .eq('id', reminder.id);
+            return;
+          }
+
+          // Get contact details
+          const contact = reminder.contacts as any;
+          if (!contact) {
+            console.error(`[Inngest Reminders] Contact not found for reminder ${reminder.id}`);
+            await supabase
+              .from('reminder_queue')
+              .update({ status: 'failed' })
+              .eq('id', reminder.id);
+            return;
+          }
+
+          // Get sender email
+          const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+          const profile = await gmail.users.getProfile({ userId: 'me' });
+          const senderEmail = profile.data.emailAddress || user.email || '';
+
+          // Send reminder email using existing sendEmail function
+          await sendEmail(
+            { email: contact.email, company: contact.company, id: contact.id },
+            {
+              subject: reminderCampaign.subject,
+              body_html: reminderCampaign.body_html,
+              body_text: reminderCampaign.body_text || '',
+              settings: reminderCampaign.settings || { delay: 45 },
+            },
+            oauth2Client,
+            senderEmail
+          );
+
+          // Update queue status
+          await supabase
+            .from('reminder_queue')
+            .update({ 
+              status: 'sent', 
+              sent_at: new Date().toISOString(),
+              reminder_count: (reminder.reminder_count || 0) + 1
+            })
+            .eq('id', reminder.id);
+
+          console.log(`[Inngest Reminders] Sent reminder ${reminder.id} to ${contact.email}`);
+        } catch (error) {
+          console.error(`[Inngest Reminders] Error sending reminder ${reminder.id}:`, error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          await supabase
+            .from('reminder_queue')
+            .update({ 
+              status: 'failed'
+            })
+            .eq('id', reminder.id);
+        }
+      });
+    }
+
+    return { processed: reminders.length };
   }
 );
 
@@ -470,7 +698,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Inngest serve function for Vercel
     const serveHandler = new InngestCommHandler({
       client: inngest,
-      functions: [sendCampaignEmails],
+      functions: [sendCampaignEmails, processReminders],
       signingKey: process.env.INNGEST_SIGNING_KEY,
       frameworkName: 'vercel',
       serveHost: baseUrl,

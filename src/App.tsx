@@ -12,6 +12,8 @@ import { Settings } from '@/pages/Settings';
 import { Setup } from '@/pages/Setup';
 import { Contacts } from '@/pages/Contacts';
 import { CampaignList } from '@/components/campaigns/CampaignList';
+import { Reminders } from '@/pages/Reminders';
+import { NewReminder } from '@/pages/NewReminder';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, initialized } = useAuthStore();
@@ -134,6 +136,26 @@ export function App() {
             <ProtectedRoute>
               <AppLayout>
                 <Settings />
+              </AppLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reminders"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Reminders />
+              </AppLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reminders/new"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <NewReminder />
               </AppLayout>
             </ProtectedRoute>
           }
