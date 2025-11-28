@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Clock, Mail, Trash2, Edit, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Clock, Mail, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
 interface ReminderRule {

@@ -544,7 +544,6 @@ export const processReminders = inngest.createFunction(
           console.log(`[Inngest Reminders] Sent reminder ${reminder.id} to ${contact.email}`);
         } catch (error) {
           console.error(`[Inngest Reminders] Error sending reminder ${reminder.id}:`, error);
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           
           await supabase
             .from('reminder_queue')
