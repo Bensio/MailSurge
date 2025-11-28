@@ -26,6 +26,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
+  // Validate Supabase configuration early
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    console.error('[Campaign Detail] Missing Supabase environment variables');
+    return res.status(500).json({ error: 'Server configuration error', details: 'Supabase not configured' });
+  }
+
   const { id, action } = req.query;
 
   if (typeof id !== 'string') {
@@ -33,11 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-      console.error('Missing Supabase environment variables');
-      return res.status(500).json({ error: 'Server configuration error' });
-    }
-
     // Get user from auth header
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -63,40 +64,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // GET /api/campaigns/[id] - Get campaign
     if (req.method === 'GET') {
-      const { data: campaignData, error: campaignError } = await supabase
-        .from('campaigns')
-        .select('*')
-        .eq('id', id)
-        .eq('user_id', user.id)
-        .single();
+      try {
+        const { data: campaignData, error: campaignError } = await supabase
+          .from('campaigns')
+          .select('*')
+          .eq('id', id)
+          .eq('user_id', user.id)
+          .single();
 
-      if (campaignError) {
-        console.error('Campaign fetch error:', campaignError);
-        if (campaignError.code === 'PGRST116' || campaignError.message?.includes('No rows')) {
+        if (campaignError) {
+          console.error('[GET Campaign] Database error:', campaignError);
+          if (campaignError.code === 'PGRST116' || campaignError.message?.includes('No rows')) {
+            return res.status(404).json({ error: 'Campaign not found' });
+          }
+          return res.status(500).json({ 
+            error: 'Failed to fetch campaign', 
+            details: campaignError.message,
+            code: campaignError.code 
+          });
+        }
+
+        if (!campaignData) {
           return res.status(404).json({ error: 'Campaign not found' });
         }
-        return res.status(404).json({ error: 'Campaign not found', details: campaignError.message });
+
+        // Optimize: Only fetch needed contact fields
+        const { data: contacts, error: contactsError } = await supabase
+          .from('contacts')
+          .select('id, email, company, name, status, sent_at, error, campaign_id, user_id, opened_at, open_count, tracking_token')
+          .eq('campaign_id', id)
+          .order('email', { ascending: true });
+
+        if (contactsError) {
+          console.error('[GET Campaign] Error fetching contacts:', contactsError);
+          // Don't fail the request if contacts can't be fetched, just log it
+        }
+
+        return res.status(200).json({
+          ...campaignData,
+          contacts: contacts || [],
+        });
+      } catch (getError) {
+        console.error('[GET Campaign] Unexpected error:', getError);
+        const errorMessage = getError instanceof Error ? getError.message : 'Unknown error';
+        return res.status(500).json({ 
+          error: 'Internal server error', 
+          details: errorMessage 
+        });
       }
-
-      if (!campaignData) {
-        return res.status(404).json({ error: 'Campaign not found' });
-      }
-
-      // Optimize: Only fetch needed contact fields
-      const { data: contacts, error: contactsError } = await supabase
-        .from('contacts')
-        .select('id, email, company, name, status, sent_at, error, campaign_id, user_id, opened_at, open_count, tracking_token')
-        .eq('campaign_id', id)
-        .order('email', { ascending: true });
-
-      if (contactsError) {
-        console.error('Error fetching contacts:', contactsError);
-      }
-
-      return res.status(200).json({
-        ...campaignData,
-        contacts: contacts || [],
-      });
     }
 
     // PUT /api/campaigns/[id] - Update campaign
@@ -133,8 +148,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('Unexpected error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('[Campaign Detail] Unexpected error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[Campaign Detail] Error stack:', errorStack);
+    return res.status(500).json({ 
+      error: 'Internal server error', 
+      details: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && { stack: errorStack })
+    });
   }
 }
 
