@@ -14,7 +14,8 @@ function getSupabaseClient() {
   );
 }
 
-const inngest = new Inngest({ 
+// Removed - now created inside handler
+// const inngest = new Inngest({ 
   id: 'mailsurge',
   name: 'MailSurge',
   eventKey: process.env.INNGEST_EVENT_KEY,
