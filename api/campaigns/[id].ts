@@ -91,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Optimize: Only fetch needed contact fields
         const { data: contacts, error: contactsError } = await supabase
           .from('contacts')
-          .select('id, email, company, name, status, sent_at, error, campaign_id, user_id, opened_at, open_count, tracking_token')
+          .select('id, email, company, status, sent_at, error, campaign_id, user_id, opened_at, open_count, tracking_token')
           .eq('campaign_id', id)
           .order('email', { ascending: true });
 
