@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { Inngest } from 'inngest';
-import { processEmailImages } from '../lib/image-processing';
+// Import processEmailImages dynamically to avoid module load issues
+// import { processEmailImages } from '../lib/image-processing';
 
 // Initialize Supabase client - will be created per request if env vars are missing
 function getSupabaseClient() {
@@ -431,6 +432,8 @@ async function handleTestSend(
     }
   }
   baseUrl = baseUrl.replace(/\/$/, '');
+  // Dynamically import to avoid module load issues
+  const { processEmailImages } = await import('../lib/image-processing');
   html = processEmailImages(html, baseUrl);
 
   // Try Gmail OAuth first, fall back to SMTP
