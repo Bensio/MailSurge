@@ -58,15 +58,30 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       
       if (!response.ok) {
         let errorMessage = 'Failed to fetch campaign';
+        let errorDetails: any = null;
         
         // Try to parse error message from response
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.details || errorMessage;
+          const text = await response.text();
+          console.error('[fetchCampaign] Error response text:', text);
+          
+          if (text) {
+            try {
+              errorDetails = JSON.parse(text);
+              errorMessage = errorDetails.error || errorDetails.details || errorMessage;
+              console.error('[fetchCampaign] Parsed error:', errorDetails);
+            } catch (parseError) {
+              // If not JSON, use the text as error message
+              errorMessage = text || `${response.status}: ${response.statusText || 'Unknown error'}`;
+            }
+          } else {
+            errorMessage = `${response.status}: ${response.statusText || 'Unknown error'}`;
+          }
         } catch (parseError) {
           // If response isn't JSON, use status text
           const statusText = response.statusText || 'Unknown error';
           errorMessage = `${response.status}: ${statusText}`;
+          console.error('[fetchCampaign] Failed to parse error response:', parseError);
         }
         
         // Handle 404 specifically - don't log these as they're expected

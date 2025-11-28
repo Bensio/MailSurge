@@ -15,30 +15,32 @@ const inngest = new Inngest({
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, DELETE, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Content-Type', 'application/json');
-
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // Validate Supabase configuration early
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-    console.error('[Campaign Detail] Missing Supabase environment variables');
-    return res.status(500).json({ error: 'Server configuration error', details: 'Supabase not configured' });
-  }
-
-  const { id, action } = req.query;
-
-  if (typeof id !== 'string') {
-    return res.status(400).json({ error: 'Invalid campaign ID' });
-  }
-
+  // Wrap everything in try-catch to catch any unhandled errors
   try {
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, DELETE, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Content-Type', 'application/json');
+
+    // Handle preflight
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+
+    // Validate Supabase configuration early
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+      console.error('[Campaign Detail] Missing Supabase environment variables');
+      return res.status(500).json({ error: 'Server configuration error', details: 'Supabase not configured' });
+    }
+
+    const { id, action } = req.query;
+
+    if (typeof id !== 'string') {
+      return res.status(400).json({ error: 'Invalid campaign ID' });
+    }
+
+    try {
     // Get user from auth header
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -67,13 +69,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         console.log('[GET Campaign] Fetching campaign:', { id, userId: user.id });
         
-        // Explicitly select columns to avoid issues with missing columns
-        const { data: campaignData, error: campaignError } = await supabase
+        // Try to select all columns, but handle missing columns gracefully
+        let campaignData: any = null;
+        let campaignError: any = null;
+        
+        // First try with all columns including design_json
+        const result = await supabase
           .from('campaigns')
           .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at, design_json')
           .eq('id', id)
           .eq('user_id', user.id)
           .single();
+        
+        campaignData = result.data;
+        campaignError = result.error;
+        
+        // If error is about missing column, try without design_json
+        if (campaignError && (campaignError.message?.includes('design_json') || campaignError.message?.includes('column'))) {
+          console.warn('[GET Campaign] design_json column may not exist, retrying without it');
+          const result2 = await supabase
+            .from('campaigns')
+            .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at')
+            .eq('id', id)
+            .eq('user_id', user.id)
+            .single();
+          campaignData = result2.data;
+          campaignError = result2.error;
+        }
 
         if (campaignError) {
           console.error('[GET Campaign] Database error:', {
