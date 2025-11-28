@@ -25,7 +25,7 @@ export function SystemStatus() {
   useEffect(() => {
     const fetchHealth = async () => {
       try {
-        const response = await fetch('/api/health');
+        const response = await fetch('/api/campaigns?health=true');
         if (!response.ok) {
           throw new Error(`Health check failed: ${response.statusText}`);
         }

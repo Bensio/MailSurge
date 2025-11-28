@@ -28,11 +28,114 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Content-Type', 'application/json');
 
+  // Handle health check via query parameter
+  if (req.query.health === 'true' || req.url?.includes('?health=true')) {
+    const { validateConfiguration } = await import('./lib/config-validator');
+    
+    const health: {
+      status: 'healthy' | 'degraded' | 'unhealthy';
+      timestamp: string;
+      config: ReturnType<typeof validateConfiguration>;
+      services: {
+        supabase: 'ok' | 'error';
+        email: 'ok' | 'error' | 'warning';
+      };
+    } = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      config: validateConfiguration(),
+      services: {
+        supabase: 'ok',
+        email: 'ok',
+      },
+    };
+
+    // Check Supabase connection
+    try {
+      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+        await supabase.from('campaigns').select('id').limit(1);
+        health.services.supabase = 'ok';
+      } else {
+        health.services.supabase = 'error';
+        health.status = 'unhealthy';
+      }
+    } catch (error) {
+      health.services.supabase = 'error';
+      health.status = 'unhealthy';
+    }
+
+    // Check email configuration
+    if (!health.config.isValid) {
+      health.services.email = 'error';
+      health.status = 'unhealthy';
+    } else if (health.config.warnings.length > 0) {
+      health.services.email = 'warning';
+      if (health.status === 'healthy') {
+        health.status = 'degraded';
+      }
+    }
+
+    const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+    return res.status(statusCode).json(health);
+  }
+
   // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
+  // Handle health check via query parameter (no auth required)
+  if (req.query.health === 'true' || req.url?.includes('?health=true')) {
+    const { validateConfiguration } = await import('./lib/config-validator');
+    
+    const health: {
+      status: 'healthy' | 'degraded' | 'unhealthy';
+      timestamp: string;
+      config: ReturnType<typeof validateConfiguration>;
+      services: {
+        supabase: 'ok' | 'error';
+        email: 'ok' | 'error' | 'warning';
+      };
+    } = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      config: validateConfiguration(),
+      services: {
+        supabase: 'ok',
+        email: 'ok',
+      },
+    };
+
+    // Check Supabase connection
+    try {
+      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+        await supabase.from('campaigns').select('id').limit(1);
+        health.services.supabase = 'ok';
+      } else {
+        health.services.supabase = 'error';
+        health.status = 'unhealthy';
+      }
+    } catch (error) {
+      health.services.supabase = 'error';
+      health.status = 'unhealthy';
+    }
+
+    // Check email configuration
+    if (!health.config.isValid) {
+      health.services.email = 'error';
+      health.status = 'unhealthy';
+    } else if (health.config.warnings.length > 0) {
+      health.services.email = 'warning';
+      if (health.status === 'healthy') {
+        health.status = 'degraded';
+      }
+    }
+
+    const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+    return res.status(statusCode).json(health);
+  }
+
+  // All other routes require authentication
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) {
     return res.status(401).json({ error: 'Unauthorized' });
