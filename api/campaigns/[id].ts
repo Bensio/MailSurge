@@ -3,10 +3,16 @@ import { createClient } from '@supabase/supabase-js';
 import { Inngest } from 'inngest';
 import { processEmailImages } from '../lib/image-processing';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+// Initialize Supabase client - will be created per request if env vars are missing
+function getSupabaseClient() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    throw new Error('Supabase configuration missing');
+  }
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+  );
+}
 
 const inngest = new Inngest({ 
   id: 'mailsurge',
@@ -34,6 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Server configuration error', details: 'Supabase not configured' });
     }
 
+    const supabase = getSupabaseClient();
     const { id, action } = req.query;
 
     if (typeof id !== 'string') {
@@ -55,12 +62,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Route based on action parameter or method
     if (action === 'send' || (req.method === 'POST' && !action)) {
       // POST /api/campaigns/[id]?action=send or POST /api/campaigns/[id]/send
-      return handleSendCampaign(req, res, id, user);
+      return handleSendCampaign(req, res, id, user, supabase);
     }
 
     if (action === 'test-send' || req.url?.includes('test-send')) {
       // POST /api/campaigns/[id]?action=test-send or POST /api/campaigns/[id]/test-send
-      return handleTestSend(req, res, id, user);
+      return handleTestSend(req, res, id, user, supabase);
     }
 
     // GET /api/campaigns/[id] - Get campaign
@@ -238,7 +245,8 @@ async function handleSendCampaign(
   req: VercelRequest,
   res: VercelResponse,
   id: string,
-  user: any
+  user: any,
+  supabase: ReturnType<typeof getSupabaseClient>
 ) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -309,6 +317,7 @@ async function handleSendCampaign(
   }
 
   try {
+    const inngest = getInngestClient();
     await inngest.send({
       name: 'campaign/send',
       data: {
@@ -336,7 +345,8 @@ async function handleTestSend(
   req: VercelRequest,
   res: VercelResponse,
   id: string,
-  user: any
+  user: any,
+  supabase: ReturnType<typeof getSupabaseClient>
 ) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
