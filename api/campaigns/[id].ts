@@ -104,34 +104,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // GET /api/campaigns/[id] - Get campaign
     if (req.method === 'GET') {
       try {
-        console.log('[GET Campaign] Fetching campaign:', { id, userId: user.id });
+        console.log('[GET Campaign] Starting fetch:', { id, userId: user.id });
         
-        // Try to select all columns, but handle missing columns gracefully
+        // Simplified query - just get the campaign first
         let campaignData: any = null;
         let campaignError: any = null;
         
-        // First try with all columns including design_json
-        const result = await supabase
-          .from('campaigns')
-          .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at, design_json')
-          .eq('id', id)
-          .eq('user_id', user.id)
-          .single();
-        
-        campaignData = result.data;
-        campaignError = result.error;
-        
-        // If error is about missing column, try without design_json
-        if (campaignError && (campaignError.message?.includes('design_json') || campaignError.message?.includes('column'))) {
-          console.warn('[GET Campaign] design_json column may not exist, retrying without it');
-          const result2 = await supabase
+        try {
+          // Try with all columns first
+          const result = await supabase
             .from('campaigns')
-            .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at')
+            .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at, design_json')
             .eq('id', id)
             .eq('user_id', user.id)
             .single();
-          campaignData = result2.data;
-          campaignError = result2.error;
+          
+          campaignData = result.data;
+          campaignError = result.error;
+          
+          // If error mentions column, try without design_json
+          if (campaignError && (campaignError.message?.includes('design_json') || campaignError.message?.includes('column') || campaignError.code === '42703')) {
+            console.warn('[GET Campaign] Retrying without design_json');
+            const result2 = await supabase
+              .from('campaigns')
+              .select('id, user_id, name, subject, body_html, body_text, from_email, status, settings, created_at, sent_at, completed_at, scheduled_at')
+              .eq('id', id)
+              .eq('user_id', user.id)
+              .single();
+            campaignData = result2.data;
+            campaignError = result2.error;
+          }
+        } catch (queryException) {
+          console.error('[GET Campaign] Exception during query:', queryException);
+          campaignError = queryException;
         }
 
         if (campaignError) {
