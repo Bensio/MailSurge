@@ -44,13 +44,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Handle health check via query parameter (no auth required)
     if (req.query.health === 'true' || req.url?.includes('?health=true')) {
       try {
-        // Dynamically import to avoid module load issues
-        const { validateConfiguration } = await import('./lib/config-validator');
+        // Inline validation to avoid module import issues
+        const validateConfig = (): {
+          isValid: boolean;
+          errors: string[];
+          warnings: string[];
+          emailMethod: 'gmail-oauth' | 'esp' | 'none' | 'both';
+        } => {
+          const errors: string[] = [];
+          const warnings: string[] = [];
+          
+          // Required: Supabase
+          if (!process.env.SUPABASE_URL) {
+            errors.push('SUPABASE_URL is not set');
+          }
+          if (!process.env.SUPABASE_SERVICE_KEY) {
+            errors.push('SUPABASE_SERVICE_KEY is not set');
+          }
+
+          // Email sending methods
+          const hasGmailOAuth = !!(
+            process.env.GOOGLE_CLIENT_ID && 
+            process.env.GOOGLE_CLIENT_SECRET && 
+            process.env.GOOGLE_REDIRECT_URI
+          );
+
+          let emailMethod: 'gmail-oauth' | 'esp' | 'none' | 'both' = 'none';
+          if (hasGmailOAuth) {
+            emailMethod = 'gmail-oauth';
+          } else {
+            warnings.push('Gmail OAuth not configured. Users can still add ESP accounts via Settings.');
+          }
+
+          // Partial Gmail OAuth config warnings
+          if (process.env.GOOGLE_CLIENT_ID && (!process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI)) {
+            warnings.push('GOOGLE_CLIENT_ID is set but Gmail OAuth is incomplete');
+          }
+
+          // Optional but recommended
+          if (!process.env.TRACKING_BASE_URL && !process.env.NEXT_PUBLIC_APP_URL) {
+            warnings.push('TRACKING_BASE_URL or NEXT_PUBLIC_APP_URL not set - email tracking may not work correctly');
+          }
+
+          if (!process.env.INNGEST_EVENT_KEY) {
+            warnings.push('INNGEST_EVENT_KEY not set - background email sending will not work');
+          }
+
+          return {
+            isValid: errors.length === 0,
+            errors,
+            warnings,
+            emailMethod,
+          };
+        };
         
         // Validate configuration safely
         let config;
         try {
-          config = validateConfiguration();
+          config = validateConfig();
         } catch (configError) {
           console.error('[Health Check] Config validation error:', configError);
           config = {
