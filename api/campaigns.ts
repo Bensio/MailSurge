@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { validateConfiguration } from './lib/config-validator';
 
 // Validation schema
 const CreateCampaignSchema = z.object({
@@ -17,125 +16,149 @@ const CreateCampaignSchema = z.object({
   design_json: z.unknown().optional().nullable(),
 });
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
+// Create Supabase client function (don't initialize at module level to avoid crashes)
+function getSupabaseClient() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    throw new Error('Supabase environment variables not configured');
+  }
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+  );
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Content-Type', 'application/json');
+  // Wrap entire handler in try-catch to prevent unhandled errors
+  try {
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Content-Type', 'application/json');
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+    // Handle preflight
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
 
-  // Handle health check via query parameter (no auth required)
-  if (req.query.health === 'true' || req.url?.includes('?health=true')) {
-    try {
-      // Validate configuration safely
-      let config;
+    // Handle health check via query parameter (no auth required)
+    if (req.query.health === 'true' || req.url?.includes('?health=true')) {
       try {
-        config = validateConfiguration();
-      } catch (configError) {
-        console.error('[Health Check] Config validation error:', configError);
-        config = {
-          isValid: false,
-          errors: [configError instanceof Error ? configError.message : 'Configuration validation failed'],
-          warnings: [],
-          emailMethod: 'none' as const,
+        // Dynamically import to avoid module load issues
+        const { validateConfiguration } = await import('./lib/config-validator');
+        
+        // Validate configuration safely
+        let config;
+        try {
+          config = validateConfiguration();
+        } catch (configError) {
+          console.error('[Health Check] Config validation error:', configError);
+          config = {
+            isValid: false,
+            errors: [configError instanceof Error ? configError.message : 'Configuration validation failed'],
+            warnings: [],
+            emailMethod: 'none' as const,
+          };
+        }
+        
+        const health: {
+          status: 'healthy' | 'degraded' | 'unhealthy';
+          timestamp: string;
+          config: typeof config;
+          services: {
+            supabase: 'ok' | 'error';
+            email: 'ok' | 'error' | 'warning';
+          };
+          error?: string;
+        } = {
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          config,
+          services: {
+            supabase: 'ok',
+            email: 'ok',
+          },
         };
-      }
-      
-      const health: {
-        status: 'healthy' | 'degraded' | 'unhealthy';
-        timestamp: string;
-        config: typeof config;
-        services: {
-          supabase: 'ok' | 'error';
-          email: 'ok' | 'error' | 'warning';
-        };
-        error?: string;
-      } = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        config,
-        services: {
-          supabase: 'ok',
-          email: 'ok',
-        },
-      };
 
-      // Check Supabase connection
-      try {
-        if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
-          // Use a simple query that won't fail on permissions
-          const { error: testError } = await supabase.from('campaigns').select('id').limit(1);
-          if (testError) {
-            console.warn('[Health Check] Supabase test query error:', testError.message);
+        // Check Supabase connection
+        try {
+          if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+            const supabaseClient = getSupabaseClient();
+            // Use a simple query that won't fail on permissions
+            const { error: testError } = await supabaseClient.from('campaigns').select('id').limit(1);
+            if (testError) {
+              console.warn('[Health Check] Supabase test query error:', testError.message);
+              health.services.supabase = 'error';
+              health.status = 'unhealthy';
+            } else {
+              health.services.supabase = 'ok';
+            }
+          } else {
             health.services.supabase = 'error';
             health.status = 'unhealthy';
-          } else {
-            health.services.supabase = 'ok';
           }
-        } else {
+        } catch (error) {
+          console.error('[Health Check] Supabase connection error:', error);
           health.services.supabase = 'error';
           health.status = 'unhealthy';
+          health.error = error instanceof Error ? error.message : 'Unknown error';
         }
+
+        // Check email configuration
+        if (!health.config.isValid) {
+          health.services.email = 'error';
+          health.status = 'unhealthy';
+        } else if (health.config.warnings.length > 0) {
+          health.services.email = 'warning';
+          if (health.status === 'healthy') {
+            health.status = 'degraded';
+          }
+        }
+
+        const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+        return res.status(statusCode).json(health);
       } catch (error) {
-        console.error('[Health Check] Supabase connection error:', error);
-        health.services.supabase = 'error';
-        health.status = 'unhealthy';
-        health.error = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[Health Check] Unexpected error:', error);
+        return res.status(500).json({
+          status: 'unhealthy',
+          timestamp: new Date().toISOString(),
+          error: error instanceof Error ? error.message : 'Unknown error',
+          config: {
+            isValid: false,
+            errors: [error instanceof Error ? error.message : 'Health check failed'],
+            warnings: [],
+            emailMethod: 'none' as const,
+          },
+          services: {
+            supabase: 'error',
+            email: 'error',
+          },
+        });
       }
+    }
 
-      // Check email configuration
-      if (!health.config.isValid) {
-        health.services.email = 'error';
-        health.status = 'unhealthy';
-      } else if (health.config.warnings.length > 0) {
-        health.services.email = 'warning';
-        if (health.status === 'healthy') {
-          health.status = 'degraded';
-        }
-      }
+    // All other routes require authentication
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-      const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
-      return res.status(statusCode).json(health);
-    } catch (error) {
-      console.error('[Health Check] Unexpected error:', error);
-      return res.status(500).json({
-        status: 'unhealthy',
-        timestamp: new Date().toISOString(),
-        error: error instanceof Error ? error.message : 'Unknown error',
-        config: {
-          isValid: false,
-          errors: [error instanceof Error ? error.message : 'Health check failed'],
-          warnings: [],
-          emailMethod: 'none' as const,
-        },
-        services: {
-          supabase: 'error',
-          email: 'error',
-        },
+    // Get Supabase client
+    let supabase;
+    try {
+      supabase = getSupabaseClient();
+    } catch (supabaseError) {
+      console.error('[Campaigns] Error creating Supabase client:', supabaseError);
+      return res.status(500).json({ 
+        error: 'Server configuration error', 
+        details: 'Failed to initialize database connection' 
       });
     }
-  }
 
-  // All other routes require authentication
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !user) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid token', details: authError?.message });
+    }
 
   // GET /api/campaigns - List campaigns, templates, or reminder rules
   if (req.method === 'GET') {
@@ -959,5 +982,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+  } catch (error) {
+    // Top-level error handler - catch any unhandled errors
+    console.error('[Campaigns API] Unhandled error:', error);
+    console.error('[Campaigns API] Error stack:', error instanceof Error ? error.stack : 'No stack');
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      message: 'An unexpected error occurred. Please check server logs.',
+    });
+  }
 }
 
