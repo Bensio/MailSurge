@@ -1,7 +1,12 @@
 # Email Account Management - Implementation Plan
 
+## ⚠️ ARCHITECTURE UPDATE
+**This plan has been updated to use OAuth (Google Workspace + Microsoft 365) and ESP integration (SendGrid/Postmark/AWS SES) instead of SMTP.**
+
+See `EMAIL_INTEGRATION_ARCHITECTURE.md` for the complete updated architecture.
+
 ## Overview
-Transform MailSurge from admin-level SMTP to per-user email account management, making it truly plug-and-play for companies.
+Transform MailSurge from admin-level SMTP to per-user email account management using OAuth and ESP providers, making it truly plug-and-play for companies.
 
 ## Phase 1: Database & Core Infrastructure
 
