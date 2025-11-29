@@ -1,12 +1,11 @@
-import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
 import { processEmailImages } from './image-processing';
 import { injectTrackingPixel } from './tracking';
+import { decrypt } from './encryption';
 
 /**
  * Unified email sending service
- * Supports both Gmail OAuth API and SMTP
- * Automatically chooses the best available method
+ * Supports Google OAuth, Microsoft OAuth, and ESP (SendGrid/Postmark/etc.)
  */
 
 export interface EmailContact {
@@ -22,16 +21,56 @@ export interface EmailCampaign {
   settings: { delay?: number; ccEmail?: string | null };
 }
 
+export interface UserEmailAccount {
+  id: string;
+  account_type: 'google_oauth' | 'microsoft_oauth' | 'esp_domain';
+  email_address: string;
+  display_name?: string;
+  // Google OAuth
+  google_token?: string;
+  google_refresh_token?: string;
+  google_token_expiry?: string;
+  // Microsoft OAuth
+  microsoft_token?: string;
+  microsoft_refresh_token?: string;
+  microsoft_token_expiry?: string;
+  // ESP
+  esp_provider?: 'sendgrid' | 'postmark' | 'ses' | 'mailgun';
+  esp_api_key_encrypted?: string;
+  domain_name?: string;
+}
+
 /**
- * Send email via Gmail API (OAuth)
+ * Send email via Google Gmail API (OAuth)
  */
-async function sendEmailViaGmailAPI(
+async function sendEmailViaGoogleOAuth(
   contact: EmailContact,
   campaign: EmailCampaign,
-  oauth2Client: any,
-  senderEmail: string,
+  account: UserEmailAccount,
   trackingToken?: string
 ): Promise<void> {
+  if (!account.google_token || !account.google_refresh_token) {
+    throw new Error('Google OAuth tokens not found for account');
+  }
+
+  // Set up OAuth client
+  let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+  if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+    redirectUri = `https://${redirectUri}`;
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    redirectUri
+  );
+
+  oauth2Client.setCredentials({
+    access_token: account.google_token,
+    refresh_token: account.google_refresh_token,
+  });
+
+  const senderEmail = account.email_address;
   // Personalize email
   let html = campaign.body_html;
   let subject = campaign.subject;
@@ -97,30 +136,20 @@ async function sendEmailViaGmailAPI(
     },
   });
   
-  console.log(`[Gmail API] Email sent successfully to ${contact.email}`);
+  console.log(`[Google OAuth] Email sent successfully to ${contact.email} from ${senderEmail}`);
 }
 
 /**
- * Send email via SMTP (Gmail App Password or other SMTP)
+ * Send email via Microsoft Graph API (OAuth)
  */
-async function sendEmailViaSMTP(
+async function sendEmailViaMicrosoftOAuth(
   contact: EmailContact,
   campaign: EmailCampaign,
+  account: UserEmailAccount,
   trackingToken?: string
 ): Promise<void> {
-  // Get SMTP configuration from environment variables
-  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPassword = process.env.SMTP_PASSWORD;
-  const senderEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
-  const senderName = process.env.SMTP_FROM_NAME || 'MailSurge';
-
-  if (!smtpUser || !smtpPassword) {
-    throw new Error(
-      'SMTP configuration missing. Please set SMTP_USER and SMTP_PASSWORD environment variables. ' +
-      'For Gmail, create an App Password at: https://myaccount.google.com/apppasswords'
-    );
+  if (!account.microsoft_token || !account.microsoft_refresh_token) {
+    throw new Error('Microsoft OAuth tokens not found for account');
   }
 
   // Personalize email
@@ -128,12 +157,11 @@ async function sendEmailViaSMTP(
   let text = campaign.body_text;
   let subject = campaign.subject;
 
-  // Replace {{company}} with actual company name
   html = html.replace(/\{\{company\}\}/g, contact.company);
   text = text.replace(/\{\{company\}\}/g, contact.company);
   subject = subject.replace(/\{\{company\}\}/g, contact.company);
 
-  // Process images to ensure all use absolute URLs
+  // Process images
   let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
   if (!baseUrl) {
     if (process.env.VERCEL_URL) {
@@ -144,104 +172,172 @@ async function sendEmailViaSMTP(
   }
   baseUrl = baseUrl.replace(/\/$/, '');
   
-  // Process images to convert relative URLs to absolute
   html = processEmailImages(html, baseUrl);
 
-  // Inject tracking pixel if tracking token is provided
   if (trackingToken) {
-    console.log(`[SMTP] Injecting tracking pixel with baseUrl: ${baseUrl}, token: ${trackingToken.substring(0, 8)}...`);
     html = injectTrackingPixel(html, trackingToken, baseUrl);
   }
 
-  // Create transporter
-  const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465, // true for 465, false for other ports
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword,
+  // TODO: Implement Microsoft Graph API sending
+  // For now, throw error to indicate not yet implemented
+  throw new Error('Microsoft OAuth email sending not yet implemented');
+}
+
+/**
+ * Send email via ESP (SendGrid, Postmark, etc.)
+ */
+async function sendEmailViaESP(
+  contact: EmailContact,
+  campaign: EmailCampaign,
+  account: UserEmailAccount,
+  trackingToken?: string
+): Promise<void> {
+  if (!account.esp_provider || !account.esp_api_key_encrypted) {
+    throw new Error('ESP configuration missing for account');
+  }
+
+  // Decrypt API key
+  const apiKey = decrypt(account.esp_api_key_encrypted);
+  const senderEmail = account.email_address;
+  const senderName = account.display_name || 'MailSurge';
+
+  // Personalize email
+  let html = campaign.body_html;
+  let text = campaign.body_text;
+  let subject = campaign.subject;
+
+  html = html.replace(/\{\{company\}\}/g, contact.company);
+  text = text.replace(/\{\{company\}\}/g, contact.company);
+  subject = subject.replace(/\{\{company\}\}/g, contact.company);
+
+  // Process images
+  let baseUrl = process.env.TRACKING_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl) {
+    if (process.env.VERCEL_URL) {
+      baseUrl = `https://${process.env.VERCEL_URL}`;
+    } else {
+      baseUrl = 'https://mailsurge.vercel.app';
+    }
+  }
+  baseUrl = baseUrl.replace(/\/$/, '');
+  
+  html = processEmailImages(html, baseUrl);
+
+  if (trackingToken) {
+    html = injectTrackingPixel(html, trackingToken, baseUrl);
+  }
+
+  // Send via ESP API
+  if (account.esp_provider === 'sendgrid') {
+    await sendViaSendGrid(apiKey, senderEmail, senderName, contact, subject, html, text, campaign);
+  } else {
+    throw new Error(`ESP provider ${account.esp_provider} not yet implemented`);
+  }
+}
+
+/**
+ * Send email via SendGrid API
+ */
+async function sendViaSendGrid(
+  apiKey: string,
+  senderEmail: string,
+  senderName: string,
+  contact: EmailContact,
+  subject: string,
+  html: string,
+  text: string,
+  campaign: EmailCampaign
+): Promise<void> {
+  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      personalizations: [{
+        to: [{ email: contact.email }],
+        ...(campaign.settings.ccEmail ? { cc: [{ email: campaign.settings.ccEmail }] } : {}),
+      }],
+      from: {
+        email: senderEmail,
+        name: senderName,
+      },
+      subject: subject,
+      content: [
+        {
+          type: 'text/plain',
+          value: text,
+        },
+        {
+          type: 'text/html',
+          value: html,
+        },
+      ],
+    }),
   });
 
-  // Send email
-  const mailOptions = {
-    from: `"${senderName}" <${senderEmail}>`,
-    to: contact.email,
-    cc: campaign.settings.ccEmail || undefined,
-    subject: subject,
-    text: text,
-    html: html,
-  };
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SendGrid API error: ${response.status} ${errorText}`);
+  }
 
-  await transporter.sendMail(mailOptions);
-  console.log(`[SMTP] Email sent successfully to ${contact.email}`);
+  console.log(`[SendGrid] Email sent successfully to ${contact.email} from ${senderEmail}`);
 }
 
 /**
  * Unified email sending function
- * Tries Gmail OAuth first, falls back to SMTP
- * Includes retry logic and better error handling
+ * Supports Google OAuth, Microsoft OAuth, and ESP providers
  */
 export async function sendEmail(
   contact: EmailContact,
   campaign: EmailCampaign,
+  account: UserEmailAccount,
   options: {
-    oauth2Client?: any;
-    senderEmail?: string;
     trackingToken?: string;
     retries?: number;
   } = {}
 ): Promise<void> {
-  const { oauth2Client, senderEmail, trackingToken, retries = 1 } = options;
-  let lastError: Error | null = null;
+  const { trackingToken, retries = 1 } = options;
 
-  // If Gmail OAuth is available, use it (preferred method)
-  if (oauth2Client && senderEmail) {
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        await sendEmailViaGmailAPI(contact, campaign, oauth2Client, senderEmail, trackingToken);
-        return;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        const isLastAttempt = attempt === retries - 1;
-        
-        // Don't retry on authentication errors
-        if (error instanceof Error && (
-          error.message.includes('invalid_grant') ||
-          error.message.includes('unauthorized') ||
-          error.message.includes('Invalid Credentials')
-        )) {
-          console.warn(`[Email Service] Gmail OAuth auth error (not retrying):`, error);
-          break; // Break out of retry loop, will fall back to SMTP
-        }
-        
-        if (!isLastAttempt) {
-          console.warn(`[Email Service] Gmail API attempt ${attempt + 1} failed, retrying...`, error);
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1))); // Exponential backoff
-        } else {
-          console.warn(`[Email Service] Gmail API failed after ${retries} attempts, falling back to SMTP:`, error);
+  // Route to appropriate sending method based on account type
+  switch (account.account_type) {
+    case 'google_oauth':
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+          await sendEmailViaGoogleOAuth(contact, campaign, account, trackingToken);
+          return;
+        } catch (error) {
+          const isLastAttempt = attempt === retries - 1;
+          
+          // Don't retry on authentication errors
+          if (error instanceof Error && (
+            error.message.includes('invalid_grant') ||
+            error.message.includes('unauthorized') ||
+            error.message.includes('Invalid Credentials')
+          )) {
+            throw error; // Throw immediately for auth errors
+          }
+          
+          if (!isLastAttempt) {
+            console.warn(`[Email Service] Google OAuth attempt ${attempt + 1} failed, retrying...`, error);
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          } else {
+            throw error;
+          }
         }
       }
-    }
-  }
+      break;
 
-  // Fall back to SMTP
-  try {
-    await sendEmailViaSMTP(contact, campaign, trackingToken);
-  } catch (error) {
-    const smtpError = error instanceof Error ? error : new Error(String(error));
-    
-    // If we tried Gmail OAuth first, include that error in the message
-    if (lastError) {
-      throw new Error(
-        `Email sending failed. Gmail OAuth: ${lastError.message}. SMTP fallback: ${smtpError.message}`
-      );
-    }
-    
-    throw smtpError;
+    case 'microsoft_oauth':
+      await sendEmailViaMicrosoftOAuth(contact, campaign, account, trackingToken);
+      break;
+
+    case 'esp_domain':
+      await sendEmailViaESP(contact, campaign, account, trackingToken);
+      break;
+
+    default:
+      throw new Error(`Unsupported account type: ${account.account_type}`);
   }
 }
-
-// Export individual functions for direct use if needed
-export { sendEmailViaSMTP, sendEmailViaGmailAPI };

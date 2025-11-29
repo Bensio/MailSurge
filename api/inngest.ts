@@ -1,6 +1,5 @@
 import { Inngest, InngestCommHandler } from 'inngest';
 import { createClient } from '@supabase/supabase-js';
-import { google } from 'googleapis';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { generateTrackingToken } from './lib/tracking';
 import { sendEmail } from './lib/email-service';
@@ -104,69 +103,20 @@ export const sendCampaignEmails = inngest.createFunction(
     }
     console.log('[Inngest Function] User found:', user.email);
 
-    // Try to set up Gmail OAuth if user has tokens
-    let oauth2Client: any = null;
-    let senderEmail: string | null = null;
-    const accessToken = user.user_metadata?.gmail_token;
-    const refreshToken = user.user_metadata?.gmail_refresh_token;
-    
-    if (accessToken && refreshToken && hasGmailOAuth) {
-      try {
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-        let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
-        
-        if (redirectUri && !redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
-          redirectUri = `https://${redirectUri}`;
-        }
-        
-        oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-        oauth2Client.setCredentials({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+    // Get user's default email account (or first available)
+    const { data: emailAccounts, error: accountsError } = await supabase
+      .from('user_email_accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .order('is_default', { ascending: false })
+      .limit(1);
 
-        // Set up token refresh handler
-        oauth2Client.on('tokens', async (tokens: any) => {
-          if (tokens.refresh_token) {
-            await supabase.auth.admin.updateUserById(userId, {
-              user_metadata: {
-                ...user?.user_metadata,
-                gmail_token: tokens.access_token,
-                gmail_refresh_token: tokens.refresh_token,
-                gmail_token_expiry: tokens.expiry_date,
-              },
-            });
-          } else if (tokens.access_token) {
-            await supabase.auth.admin.updateUserById(userId, {
-              user_metadata: {
-                ...user?.user_metadata,
-                gmail_token: tokens.access_token,
-                gmail_token_expiry: tokens.expiry_date,
-              },
-            });
-          }
-        });
-
-        // Get sender email from Gmail profile
-        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-        try {
-          const profile = await gmail.users.getProfile({ userId: 'me' });
-          senderEmail = profile.data.emailAddress || user?.email || '';
-          console.log('[Inngest Function] Using Gmail OAuth for email sending:', senderEmail);
-        } catch (profileError) {
-          console.warn('[Inngest Function] Could not get Gmail profile, will use SMTP fallback:', profileError);
-          oauth2Client = null;
-        }
-      } catch (oauthError) {
-        console.warn('[Inngest Function] Gmail OAuth setup failed, will use SMTP fallback:', oauthError);
-        oauth2Client = null;
-      }
+    if (accountsError || !emailAccounts || emailAccounts.length === 0) {
+      throw new Error('No email account configured. Please add an email account in Settings.');
     }
 
-    if (!oauth2Client) {
-      console.log('[Inngest Function] Using SMTP for email sending (no Gmail OAuth tokens or setup failed)');
-    }
+    const emailAccount = emailAccounts[0];
+    console.log(`[Inngest Function] Using email account: ${emailAccount.email_address} (${emailAccount.account_type})`);
 
     // Filter contacts to send
     const contacts = (campaign.contacts || []).filter(
@@ -210,11 +160,8 @@ export const sendCampaignEmails = inngest.createFunction(
             console.log(`[Inngest] Stored tracking token for contact ${contact.id}`);
           }
 
-          // Send email (will use Gmail OAuth if available, otherwise SMTP)
-          // Retry up to 2 times for better reliability
-          await sendEmail(contact, campaign, {
-            oauth2Client: oauth2Client || undefined,
-            senderEmail: senderEmail || undefined,
+          // Send email using the user's email account
+          await sendEmail(contact, campaign, emailAccount, {
             trackingToken,
             retries: 2,
           });
@@ -396,44 +343,6 @@ export const processReminders = inngest.createFunction(
     for (const reminder of reminders) {
       await step.run(`send-reminder-${reminder.id}`, async () => {
         try {
-          // Get user's Gmail tokens (if available)
-          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(reminder.user_id);
-          
-          let oauth2Client: any = null;
-          let senderEmail: string | null = null;
-          
-          if (!userError && userData?.user) {
-            const user = userData.user;
-            const accessToken = user.user_metadata?.gmail_token;
-            const refreshToken = user.user_metadata?.gmail_refresh_token;
-            
-            if (accessToken && refreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-              try {
-                let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
-                if (redirectUri && !redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
-                  redirectUri = `https://${redirectUri}`;
-                }
-                
-                oauth2Client = new google.auth.OAuth2(
-                  process.env.GOOGLE_CLIENT_ID,
-                  process.env.GOOGLE_CLIENT_SECRET,
-                  redirectUri
-                );
-                oauth2Client.setCredentials({
-                  access_token: accessToken,
-                  refresh_token: refreshToken,
-                });
-
-                // Get sender email
-                const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-                const profile = await gmail.users.getProfile({ userId: 'me' });
-                senderEmail = profile.data.emailAddress || user.email || '';
-              } catch (oauthError) {
-                console.warn(`[Inngest Reminders] Gmail OAuth setup failed for reminder ${reminder.id}, using SMTP:`, oauthError);
-              }
-            }
-          }
-
           // Get reminder campaign details
           const reminderCampaign = reminder.campaigns as any;
           if (!reminderCampaign) {
@@ -462,7 +371,26 @@ export const processReminders = inngest.createFunction(
           // Store tracking token in reminder_queue (NOT in contacts - that's for campaign emails)
           // This allows us to distinguish between campaign opens and reminder opens
 
-          // Send reminder email (will use Gmail OAuth if available, otherwise SMTP)
+          // Get user's default email account for this reminder
+          const reminderUserId = (reminder.contacts as any)?.user_id || (reminder.reminder_rules as any)?.user_id;
+          if (!reminderUserId) {
+            throw new Error('Could not determine user ID for reminder');
+          }
+
+          const { data: reminderEmailAccounts } = await supabase
+            .from('user_email_accounts')
+            .select('*')
+            .eq('user_id', reminderUserId)
+            .order('is_default', { ascending: false })
+            .limit(1);
+
+          if (!reminderEmailAccounts || reminderEmailAccounts.length === 0) {
+            throw new Error('No email account configured for reminder user');
+          }
+
+          const reminderEmailAccount = reminderEmailAccounts[0];
+
+          // Send reminder email using the user's email account
           await sendEmail(
             { email: contact.email, company: contact.company, id: contact.id },
             {
@@ -471,9 +399,8 @@ export const processReminders = inngest.createFunction(
               body_text: reminderCampaign.body_text || '',
               settings: reminderCampaign.settings || { delay: 45 },
             },
+            reminderEmailAccount,
             {
-              oauth2Client: oauth2Client || undefined,
-              senderEmail: senderEmail || undefined,
               trackingToken: reminderTrackingToken,
             }
           );
