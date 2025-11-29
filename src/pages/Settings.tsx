@@ -8,9 +8,10 @@ import { Label } from '@/components/ui/label';
 import { getGmailAuthUrl, getConnectedGmailAccounts } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
-import { CheckCircle2, XCircle, Info, Trash2, RefreshCw, X, Plus } from 'lucide-react';
+import { CheckCircle2, XCircle, Trash2, RefreshCw, X, Plus } from 'lucide-react';
 import { validateEmail } from '@/lib/utils';
 import { SystemStatus } from '@/components/Settings/SystemStatus';
+import { EmailAccounts } from '@/components/Settings/EmailAccounts';
 
 export function Settings() {
   const { user, refreshUser } = useAuthStore();
@@ -334,32 +335,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Email Accounts</CardTitle>
-          <CardDescription>
-            Manage your email accounts for sending campaigns
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
-            <div className="flex items-start gap-2">
-              <Info className="h-5 w-5 text-blue-600 mt-0.5" />
-              <div className="flex-1 space-y-2">
-                <p className="text-sm font-medium text-blue-900">Email Account Management</p>
-                <p className="text-sm text-blue-800">
-                  Connect Google Workspace, Microsoft 365, or custom domain email accounts to send campaigns. 
-                  Each user manages their own email accounts.
-                </p>
-                <p className="text-xs text-blue-700 mt-2">
-                  <strong>Coming soon:</strong> Full email account management UI with support for multiple accounts, 
-                  custom domains, and ESP integration (SendGrid, Postmark, etc.).
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <EmailAccounts />
 
       <Card>
         <CardHeader>

@@ -26,14 +26,30 @@ export function SystemStatus() {
     const fetchHealth = async () => {
       try {
         const response = await fetch('/api/campaigns?health=true');
+        
         if (!response.ok) {
-          throw new Error(`Health check failed: ${response.statusText}`);
+          // Try to get error details from response
+          let errorDetails = `HTTP ${response.status}: ${response.statusText}`;
+          try {
+            const errorData = await response.json();
+            if (errorData.error) {
+              errorDetails = errorData.error;
+            } else if (errorData.errors && errorData.errors.length > 0) {
+              errorDetails = errorData.errors.join(', ');
+            }
+          } catch {
+            // If response isn't JSON, use status text
+          }
+          throw new Error(errorDetails);
         }
+        
         const data = await response.json();
         setHealth(data);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch system status');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch system status';
+        console.error('[SystemStatus] Health check error:', err);
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
