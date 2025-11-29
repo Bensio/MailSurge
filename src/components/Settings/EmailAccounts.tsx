@@ -97,16 +97,25 @@ export function EmailAccounts() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        const details = errorData.details || '';
         
-        // Check if it's a table not found error
-        if (errorMessage.includes('user_email_accounts') || errorMessage.includes('schema cache')) {
-          throw new Error(
+        // Check if it's a migration required error
+        if (errorData.migrationRequired || errorMessage.includes('user_email_accounts') || errorMessage.includes('schema cache') || errorMessage.includes('Database migration required')) {
+          const migrationError = new Error(
             'Database migration required. Please run migration 010_add_user_email_accounts.sql in your Supabase database. ' +
             'See docs/MIGRATION_010_REQUIRED.md for instructions.'
           );
+          // Show a more prominent error
+          toast({
+            title: 'Database Migration Required',
+            description: 'The user_email_accounts table does not exist. Please run migration 010_add_user_email_accounts.sql in your Supabase database.',
+            variant: 'destructive',
+            duration: 10000, // Show for 10 seconds
+          });
+          throw migrationError;
         }
         
-        throw new Error(errorMessage);
+        throw new Error(errorMessage + (details ? `: ${details}` : ''));
       }
 
       const data = await response.json();
@@ -160,10 +169,40 @@ export function EmailAccounts() {
   const handleAddESPAccount = async () => {
     if (!user) return;
 
-    if (!formData.email || !formData.espApiKey || !formData.domainName) {
+    // Validate email format
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       toast({
         title: 'Validation Error',
-        description: 'Please fill in all required fields',
+        description: 'Please enter a valid email address',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.espApiKey || formData.espApiKey.trim().length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter your ESP API key',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formData.domainName || formData.domainName.trim().length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter your domain name (e.g., yourdomain.com)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate domain format (basic)
+    const domainRegex = /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/i;
+    if (!domainRegex.test(formData.domainName)) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a valid domain name (e.g., yourdomain.com)',
         variant: 'destructive',
       });
       return;
@@ -171,9 +210,10 @@ export function EmailAccounts() {
 
     setSubmitting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('Not authenticated. Please sign in again.');
       }
 
       const response = await fetch('/api/campaigns?type=email-accounts', {
@@ -184,22 +224,38 @@ export function EmailAccounts() {
         },
         body: JSON.stringify({
           account_type: 'esp_domain',
-          email_address: formData.email,
-          display_name: formData.displayName || formData.email,
+          email_address: formData.email.trim().toLowerCase(),
+          display_name: formData.displayName?.trim() || formData.email.trim(),
           esp_provider: formData.espProvider,
-          esp_api_key: formData.espApiKey,
-          domain_name: formData.domainName,
+          esp_api_key: formData.espApiKey.trim(),
+          domain_name: formData.domainName.trim().toLowerCase(),
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to add ESP account');
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        
+        // Check for migration error
+        if (errorData.migrationRequired || errorMessage.includes('Database migration required')) {
+          toast({
+            title: 'Database Migration Required',
+            description: 'Please run migration 010_add_user_email_accounts.sql first.',
+            variant: 'destructive',
+            duration: 10000,
+          });
+          return;
+        }
+        
+        throw new Error(errorMessage);
       }
+
+      const accountData = await response.json();
 
       toast({
         title: 'Success',
-        description: 'ESP account added successfully. Please verify your domain.',
+        description: `ESP account added successfully! Domain: ${formData.domainName}. Click "Verify Domain" to check DNS records.`,
+        duration: 8000,
       });
 
       setShowAddForm(false);
@@ -211,6 +267,13 @@ export function EmailAccounts() {
         domainName: '',
       });
       await loadAccounts();
+      
+      // Auto-verify domain after a short delay
+      if (accountData.id) {
+        setTimeout(() => {
+          handleVerifyDomain(accountData.id);
+        }, 2000);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -302,9 +365,10 @@ export function EmailAccounts() {
   const handleVerifyDomain = async (accountId: string) => {
     setVerifyingDomain(accountId);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('Not authenticated. Please sign in again.');
       }
 
       const response = await fetch(`/api/campaigns?type=verify-domain&account_id=${accountId}`, {
@@ -314,35 +378,64 @@ export function EmailAccounts() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to verify domain');
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        
+        // Check for migration error
+        if (errorData.migrationRequired || errorMessage.includes('Database migration required')) {
+          toast({
+            title: 'Database Migration Required',
+            description: 'Please run migration 010_add_user_email_accounts.sql first.',
+            variant: 'destructive',
+            duration: 10000,
+          });
+          return;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const verification = await response.json();
       
       if (verification.ownership && verification.spf.valid && verification.dkim.valid && verification.dmarc.valid) {
         toast({
-          title: 'Success',
-          description: 'Domain verified successfully!',
+          title: 'Domain Verified Successfully! ✅',
+          description: 'All DNS records are configured correctly. Your domain is ready to send emails.',
+          duration: 8000,
         });
       } else {
         const issues = [];
-        if (!verification.ownership) issues.push('Ownership TXT record');
-        if (!verification.spf.valid) issues.push('SPF record');
-        if (!verification.dkim.valid) issues.push('DKIM record');
-        if (!verification.dmarc.valid) issues.push('DMARC record');
+        const details = [];
+        
+        if (!verification.ownership) {
+          issues.push('Ownership TXT record');
+          details.push('Add a TXT record with: mailsurge-verification=...');
+        }
+        if (!verification.spf.valid) {
+          issues.push('SPF record');
+          details.push('Add SPF record: v=spf1 include:...');
+        }
+        if (!verification.dkim.valid) {
+          issues.push('DKIM record');
+          details.push('Add DKIM record from your ESP provider');
+        }
+        if (!verification.dmarc.valid) {
+          issues.push('DMARC record');
+          details.push('Add DMARC record: v=DMARC1; p=...');
+        }
         
         toast({
           title: 'Domain Verification Incomplete',
-          description: `Missing or invalid: ${issues.join(', ')}. Please check your DNS settings.`,
+          description: `Missing or invalid: ${issues.join(', ')}. Check your DNS settings and try again.`,
           variant: 'destructive',
+          duration: 10000,
         });
       }
 
       await loadAccounts();
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Verification Error',
         description: error instanceof Error ? error.message : 'Failed to verify domain',
         variant: 'destructive',
       });

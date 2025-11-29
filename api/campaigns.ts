@@ -37,11 +37,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Handle health check via query parameter (no auth required)
   if (req.query.health === 'true' || req.url?.includes('?health=true')) {
     try {
+      // Validate configuration safely
+      let config;
+      try {
+        config = validateConfiguration();
+      } catch (configError) {
+        console.error('[Health Check] Config validation error:', configError);
+        config = {
+          isValid: false,
+          errors: [configError instanceof Error ? configError.message : 'Configuration validation failed'],
+          warnings: [],
+          emailMethod: 'none' as const,
+        };
+      }
       
       const health: {
         status: 'healthy' | 'degraded' | 'unhealthy';
         timestamp: string;
-        config: ReturnType<typeof validateConfiguration>;
+        config: typeof config;
         services: {
           supabase: 'ok' | 'error';
           email: 'ok' | 'error' | 'warning';
@@ -50,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        config: validateConfiguration(),
+        config,
         services: {
           supabase: 'ok',
           email: 'ok',
@@ -159,18 +172,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // GET /api/campaigns?type=email-accounts - List user's email accounts
       if (type === 'email-accounts') {
-        const { data, error } = await supabase
-          .from('user_email_accounts')
-          .select('id, account_type, email_address, display_name, is_default, domain_name, domain_verified, esp_provider, created_at, updated_at')
-          .eq('user_id', user.id)
-          .order('is_default', { ascending: false })
-          .order('created_at', { ascending: false });
-        
-        if (error) {
-          console.error('[Email Accounts] Database error:', error);
-          return res.status(500).json({ error: error.message });
+        try {
+          const { data, error } = await supabase
+            .from('user_email_accounts')
+            .select('id, account_type, email_address, display_name, is_default, domain_name, domain_verified, esp_provider, created_at, updated_at')
+            .eq('user_id', user.id)
+            .order('is_default', { ascending: false })
+            .order('created_at', { ascending: false });
+          
+          if (error) {
+            console.error('[Email Accounts] Database error:', error);
+            
+            // Check if it's a table not found error
+            if (error.message?.includes('user_email_accounts') || error.message?.includes('schema cache') || error.code === '42P01') {
+              return res.status(503).json({ 
+                error: 'Database migration required',
+                details: 'The user_email_accounts table does not exist. Please run migration 010_add_user_email_accounts.sql in your Supabase database. See docs/MIGRATION_010_REQUIRED.md for instructions.',
+                migrationRequired: true,
+              });
+            }
+            
+            return res.status(500).json({ error: error.message, details: error });
+          }
+          return res.json(data || []);
+        } catch (unexpectedError) {
+          console.error('[Email Accounts] Unexpected error:', unexpectedError);
+          return res.status(500).json({ 
+            error: 'Failed to load email accounts',
+            details: unexpectedError instanceof Error ? unexpectedError.message : 'Unknown error',
+          });
         }
-        return res.json(data || []);
       }
 
       // GET /api/campaigns?type=verify-domain&account_id=xxx - Verify domain DNS records
