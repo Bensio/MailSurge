@@ -59,13 +59,33 @@ export function EmailAccounts() {
   }, [user]);
 
   const loadAccounts = async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('[EmailAccounts] Session error:', sessionError);
+        // If refresh token is invalid, user needs to sign in again
+        if (sessionError.message?.includes('Refresh Token')) {
+          toast({
+            title: 'Session Expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive',
+          });
+          // Redirect to login or refresh
+          window.location.href = '/login';
+          return;
+        }
+        throw new Error(sessionError.message || 'Not authenticated');
+      }
+
       if (!session) {
-        throw new Error('Not authenticated');
+        throw new Error('Not authenticated. Please sign in.');
       }
 
       const response = await fetch('/api/campaigns?type=email-accounts', {
@@ -75,18 +95,22 @@ export function EmailAccounts() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to load email accounts');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
       setAccounts(data || []);
     } catch (error) {
-      console.error('Error loading accounts:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to load email accounts',
-        variant: 'destructive',
-      });
+      console.error('[EmailAccounts] Error loading accounts:', error);
+      // Don't show toast for session errors (already handled above)
+      if (!(error instanceof Error && error.message.includes('Session'))) {
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to load email accounts',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }

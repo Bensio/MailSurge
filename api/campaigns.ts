@@ -35,53 +35,82 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Handle health check via query parameter (no auth required)
   if (req.query.health === 'true' || req.url?.includes('?health=true')) {
-    const { validateConfiguration } = await import('./lib/config-validator');
-    
-    const health: {
-      status: 'healthy' | 'degraded' | 'unhealthy';
-      timestamp: string;
-      config: ReturnType<typeof validateConfiguration>;
-      services: {
-        supabase: 'ok' | 'error';
-        email: 'ok' | 'error' | 'warning';
-      };
-    } = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      config: validateConfiguration(),
-      services: {
-        supabase: 'ok',
-        email: 'ok',
-      },
-    };
-
-    // Check Supabase connection
     try {
-      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
-        await supabase.from('campaigns').select('id').limit(1);
-        health.services.supabase = 'ok';
-      } else {
+      const { validateConfiguration } = await import('./lib/config-validator');
+      
+      const health: {
+        status: 'healthy' | 'degraded' | 'unhealthy';
+        timestamp: string;
+        config: ReturnType<typeof validateConfiguration>;
+        services: {
+          supabase: 'ok' | 'error';
+          email: 'ok' | 'error' | 'warning';
+        };
+        error?: string;
+      } = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        config: validateConfiguration(),
+        services: {
+          supabase: 'ok',
+          email: 'ok',
+        },
+      };
+
+      // Check Supabase connection
+      try {
+        if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+          // Use a simple query that won't fail on permissions
+          const { error: testError } = await supabase.from('campaigns').select('id').limit(1);
+          if (testError) {
+            console.warn('[Health Check] Supabase test query error:', testError.message);
+            health.services.supabase = 'error';
+            health.status = 'unhealthy';
+          } else {
+            health.services.supabase = 'ok';
+          }
+        } else {
+          health.services.supabase = 'error';
+          health.status = 'unhealthy';
+        }
+      } catch (error) {
+        console.error('[Health Check] Supabase connection error:', error);
         health.services.supabase = 'error';
         health.status = 'unhealthy';
+        health.error = error instanceof Error ? error.message : 'Unknown error';
       }
+
+      // Check email configuration
+      if (!health.config.isValid) {
+        health.services.email = 'error';
+        health.status = 'unhealthy';
+      } else if (health.config.warnings.length > 0) {
+        health.services.email = 'warning';
+        if (health.status === 'healthy') {
+          health.status = 'degraded';
+        }
+      }
+
+      const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+      return res.status(statusCode).json(health);
     } catch (error) {
-      health.services.supabase = 'error';
-      health.status = 'unhealthy';
+      console.error('[Health Check] Unexpected error:', error);
+      return res.status(500).json({
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Unknown error',
+        config: {
+          isValid: false,
+          errors: [error instanceof Error ? error.message : 'Health check failed'],
+          warnings: [],
+          emailMethod: 'none' as const,
+        },
+        services: {
+          supabase: 'error',
+          email: 'error',
+        },
+      });
     }
-
-    // Check email configuration
-    if (!health.config.isValid) {
-      health.services.email = 'error';
-      health.status = 'unhealthy';
-    } else if (health.config.warnings.length > 0) {
-      health.services.email = 'warning';
-      if (health.status === 'healthy') {
-        health.status = 'degraded';
-      }
-    }
-
-    const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
-    return res.status(statusCode).json(health);
   }
 
   // All other routes require authentication
