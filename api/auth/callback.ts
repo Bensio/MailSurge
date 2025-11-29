@@ -93,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continue anyway - we can try to get it later
     }
 
-    // Store tokens and email in user metadata
+    // Store tokens and email in user metadata (for backward compatibility)
     console.log('[OAuth Callback] Storing tokens in user metadata...');
     const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
       user_metadata: {
@@ -108,6 +108,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (updateError) {
       console.error('[OAuth Callback] Error updating user:', updateError);
       return res.status(500).json({ error: 'Failed to save Gmail credentials' });
+    }
+    
+    console.log('[OAuth Callback] Tokens stored in user metadata');
+
+    // Also create/update email account in user_email_accounts table
+    if (gmailEmail) {
+      console.log('[OAuth Callback] Creating email account entry...');
+      
+      // Check if account already exists
+      const { data: existingAccount } = await supabase
+        .from('user_email_accounts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('email_address', gmailEmail)
+        .eq('account_type', 'google_oauth')
+        .single();
+
+      if (existingAccount) {
+        // Update existing account
+        const { error: updateAccountError } = await supabase
+          .from('user_email_accounts')
+          .update({
+            google_token: tokens.access_token,
+            google_refresh_token: tokens.refresh_token,
+            google_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingAccount.id);
+
+        if (updateAccountError) {
+          console.warn('[OAuth Callback] Error updating email account:', updateAccountError);
+        } else {
+          console.log('[OAuth Callback] Email account updated successfully');
+        }
+      } else {
+        // Check if user has any accounts (to determine if this should be default)
+        const { count } = await supabase
+          .from('user_email_accounts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id);
+
+        const isDefault = (count || 0) === 0;
+
+        // Create new account
+        const { error: createAccountError } = await supabase
+          .from('user_email_accounts')
+          .insert({
+            user_id: user.id,
+            account_type: 'google_oauth',
+            email_address: gmailEmail,
+            display_name: gmailEmail,
+            is_default: isDefault,
+            google_token: tokens.access_token,
+            google_refresh_token: tokens.refresh_token,
+            google_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+          });
+
+        if (createAccountError) {
+          console.warn('[OAuth Callback] Error creating email account:', createAccountError);
+        } else {
+          console.log('[OAuth Callback] Email account created successfully');
+        }
+      }
     }
     
     console.log('[OAuth Callback] Tokens stored successfully');
