@@ -9,7 +9,7 @@ interface HealthStatus {
     isValid: boolean;
     errors: string[];
     warnings: string[];
-    emailMethod: 'gmail-oauth' | 'smtp' | 'none' | 'both';
+    emailMethod: 'gmail-oauth' | 'esp' | 'none' | 'both';
   };
   services: {
     supabase: 'ok' | 'error';
@@ -70,9 +70,23 @@ export function SystemStatus() {
           <CardDescription>Unable to check system status</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-2 text-red-600">
-            <XCircle className="h-4 w-4" />
-            <span className="text-sm">{error || 'Unknown error'}</span>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-red-600">
+              <XCircle className="h-4 w-4" />
+              <span className="text-sm font-medium">Health check failed</span>
+            </div>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p><strong>Error:</strong> {error || 'Unknown error'}</p>
+              <p className="mt-2">This could indicate:</p>
+              <ul className="list-disc list-inside ml-2 space-y-0.5">
+                <li>API endpoint is not responding</li>
+                <li>Network connectivity issues</li>
+                <li>Server configuration problems</li>
+              </ul>
+              <p className="mt-2 text-xs">
+                Check browser console for more details or contact support if the issue persists.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -104,13 +118,15 @@ export function SystemStatus() {
   const getEmailMethodText = () => {
     switch (health.config.emailMethod) {
       case 'both':
-        return 'Gmail OAuth + SMTP';
+        return 'Gmail OAuth + ESP';
       case 'gmail-oauth':
-        return 'Gmail OAuth';
-      case 'smtp':
-        return 'SMTP';
+        return 'Gmail OAuth (users can add ESP accounts)';
+      case 'esp':
+        return 'ESP (SendGrid/Postmark/etc.)';
       case 'none':
-        return 'Not configured';
+        return 'Not configured - Add email account in Settings';
+      default:
+        return 'Unknown';
     }
   };
 

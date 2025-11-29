@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { getGmailAuthUrl, getConnectedGmailAccounts } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
 import { logger } from '@/lib/logger';
-import { CheckCircle2, XCircle, ExternalLink, Info, Trash2, RefreshCw, X, Plus } from 'lucide-react';
+import { CheckCircle2, XCircle, Info, Trash2, RefreshCw, X, Plus } from 'lucide-react';
 import { validateEmail } from '@/lib/utils';
 import { SystemStatus } from '@/components/Settings/SystemStatus';
 
@@ -292,7 +292,7 @@ export function Settings() {
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Emails will be sent from your connected Gmail account. If not connected, SMTP (admin-configured) will be used as fallback.
+                    Emails will be sent from your connected Gmail account. Add more accounts or connect custom domains in Email Accounts section.
                   </p>
                 </div>
               ) : (
@@ -302,7 +302,7 @@ export function Settings() {
                     <span>No Gmail account connected</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Connect your Gmail to send from your own address. If not connected, emails will be sent via SMTP (admin-configured).
+                    Connect your Gmail to send from your own address. You can also add custom domain email accounts below.
                   </p>
                 </div>
               )}
@@ -336,9 +336,9 @@ export function Settings() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Email Sending (SMTP Fallback)</CardTitle>
+          <CardTitle>Email Accounts</CardTitle>
           <CardDescription>
-            Admin-configured SMTP - works for all users without setup
+            Manage your email accounts for sending campaigns
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -346,21 +346,15 @@ export function Settings() {
             <div className="flex items-start gap-2">
               <Info className="h-5 w-5 text-blue-600 mt-0.5" />
               <div className="flex-1 space-y-2">
-                <p className="text-sm font-medium text-blue-900">Automatic Fallback</p>
+                <p className="text-sm font-medium text-blue-900">Email Account Management</p>
                 <p className="text-sm text-blue-800">
-                  If you don't connect Gmail, emails will automatically be sent via SMTP (configured by admin). 
-                  This ensures email sending always works, even without Gmail OAuth setup.
+                  Connect Google Workspace, Microsoft 365, or custom domain email accounts to send campaigns. 
+                  Each user manages their own email accounts.
                 </p>
-                <div className="pt-2">
-                  <a 
-                    href="/docs/SMTP_SETUP.md" 
-                    target="_blank"
-                    className="text-xs text-blue-700 hover:text-blue-900 underline flex items-center gap-1"
-                  >
-                    View SMTP setup guide (for admins)
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
+                <p className="text-xs text-blue-700 mt-2">
+                  <strong>Coming soon:</strong> Full email account management UI with support for multiple accounts, 
+                  custom domains, and ESP integration (SendGrid, Postmark, etc.).
+                </p>
               </div>
             </div>
           </div>

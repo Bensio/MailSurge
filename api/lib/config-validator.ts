@@ -7,7 +7,7 @@ export interface ConfigStatus {
   isValid: boolean;
   errors: string[];
   warnings: string[];
-  emailMethod: 'gmail-oauth' | 'smtp' | 'none' | 'both';
+  emailMethod: 'gmail-oauth' | 'esp' | 'none' | 'both';
 }
 
 /**
@@ -26,30 +26,21 @@ export function validateConfiguration(): ConfigStatus {
   }
 
   // Email sending methods
-  const hasSMTP = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+  // Note: Email accounts are now user-managed (OAuth + ESP), not admin-configured
+  // We only check if Gmail OAuth is available for users to connect
   const hasGmailOAuth = !!(
     process.env.GOOGLE_CLIENT_ID && 
     process.env.GOOGLE_CLIENT_SECRET && 
     process.env.GOOGLE_REDIRECT_URI
   );
 
-  let emailMethod: 'gmail-oauth' | 'smtp' | 'none' | 'both' = 'none';
-  if (hasSMTP && hasGmailOAuth) {
-    emailMethod = 'both';
-  } else if (hasGmailOAuth) {
+  let emailMethod: 'gmail-oauth' | 'esp' | 'none' | 'both' = 'none';
+  if (hasGmailOAuth) {
     emailMethod = 'gmail-oauth';
-  } else if (hasSMTP) {
-    emailMethod = 'smtp';
+    // Note: ESP accounts are user-managed, so we don't check for them here
+    // Users can add SendGrid/Postmark/etc. accounts via the UI
   } else {
-    errors.push('No email sending method configured. Set up either SMTP (SMTP_USER, SMTP_PASSWORD) or Gmail OAuth (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)');
-  }
-
-  // Partial SMTP config warning
-  if (process.env.SMTP_USER && !process.env.SMTP_PASSWORD) {
-    warnings.push('SMTP_USER is set but SMTP_PASSWORD is missing');
-  }
-  if (!process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
-    warnings.push('SMTP_PASSWORD is set but SMTP_USER is missing');
+    warnings.push('Gmail OAuth not configured (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI). Users can still add ESP accounts (SendGrid, Postmark, etc.) via Settings.');
   }
 
   // Partial Gmail OAuth config warnings
@@ -81,11 +72,11 @@ export function getConfigStatusMessage(status: ConfigStatus): string {
   if (status.isValid) {
     const methods = [];
     if (status.emailMethod === 'both') {
-      methods.push('Gmail OAuth and SMTP');
+      methods.push('Gmail OAuth and ESP');
     } else if (status.emailMethod === 'gmail-oauth') {
-      methods.push('Gmail OAuth');
-    } else if (status.emailMethod === 'smtp') {
-      methods.push('SMTP');
+      methods.push('Gmail OAuth (users can also add ESP accounts)');
+    } else if (status.emailMethod === 'esp') {
+      methods.push('ESP (SendGrid, Postmark, etc.)');
     }
     return `✅ Configuration valid. Email sending: ${methods.join(' + ')}`;
   }
