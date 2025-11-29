@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { validateConfiguration } from './lib/config-validator';
 
 // Validation schema
 const CreateCampaignSchema = z.object({
@@ -36,7 +37,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Handle health check via query parameter (no auth required)
   if (req.query.health === 'true' || req.url?.includes('?health=true')) {
     try {
-      const { validateConfiguration } = await import('./lib/config-validator');
       
       const health: {
         status: 'healthy' | 'degraded' | 'unhealthy';

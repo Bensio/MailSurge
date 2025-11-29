@@ -96,7 +96,17 @@ export function EmailAccounts() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+        
+        // Check if it's a table not found error
+        if (errorMessage.includes('user_email_accounts') || errorMessage.includes('schema cache')) {
+          throw new Error(
+            'Database migration required. Please run migration 010_add_user_email_accounts.sql in your Supabase database. ' +
+            'See docs/MIGRATION_010_REQUIRED.md for instructions.'
+          );
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
