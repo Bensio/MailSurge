@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle2, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, Loader2, Mail, Database, Send, Info } from 'lucide-react';
 
 interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -146,6 +146,14 @@ export function SystemStatus() {
     }
   };
 
+  // Filter out non-critical warnings for cleaner display
+  const criticalWarnings = health.config.warnings.filter(w => 
+    !w.includes('TRACKING_BASE_URL') && !w.includes('NEXT_PUBLIC_APP_URL')
+  );
+  const trackingWarning = health.config.warnings.find(w => 
+    w.includes('TRACKING_BASE_URL') || w.includes('NEXT_PUBLIC_APP_URL')
+  );
+
   return (
     <Card>
       <CardHeader>
@@ -153,76 +161,113 @@ export function SystemStatus() {
         <CardDescription>Current system configuration and health</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center gap-2">
+        {/* Status Header */}
+        <div className="flex items-center gap-3 pb-3 border-b">
           {getStatusIcon()}
-          <span className="font-medium">{getStatusText()}</span>
+          <div className="flex-1">
+            <p className="font-medium text-sm">{getStatusText()}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Last checked: {new Date(health.timestamp).toLocaleTimeString()}
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Email Method:</span>
-            <span className="font-medium">{getEmailMethodText()}</span>
+        {/* Service Status Grid */}
+        <div className="grid grid-cols-1 gap-3">
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Mail className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Email Method</span>
+            </div>
+            <span className="text-sm text-muted-foreground">{getEmailMethodText()}</span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Supabase:</span>
+          
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Database</span>
+            </div>
             {health.services.supabase === 'ok' ? (
-              <span className="text-green-600 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
+              <span className="text-sm text-green-600 flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" />
                 Connected
               </span>
             ) : (
-              <span className="text-red-600 flex items-center gap-1">
-                <XCircle className="h-3 w-3" />
+              <span className="text-sm text-red-600 flex items-center gap-1.5">
+                <XCircle className="h-3.5 w-3.5" />
                 Error
               </span>
             )}
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Email Service:</span>
+          
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Send className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Email Service</span>
+            </div>
             {health.services.email === 'ok' ? (
-              <span className="text-green-600 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
+              <span className="text-sm text-green-600 flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" />
                 Ready
               </span>
             ) : health.services.email === 'warning' ? (
-              <span className="text-yellow-600 flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
+              <span className="text-sm text-yellow-600 flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5" />
                 Warning
               </span>
             ) : (
-              <span className="text-red-600 flex items-center gap-1">
-                <XCircle className="h-3 w-3" />
+              <span className="text-sm text-red-600 flex items-center gap-1.5">
+                <XCircle className="h-3.5 w-3.5" />
                 Error
               </span>
             )}
           </div>
         </div>
 
+        {/* Critical Errors */}
         {health.config.errors.length > 0 && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm font-medium text-red-900 mb-2">Configuration Errors:</p>
-            <ul className="text-xs text-red-800 space-y-1 list-disc list-inside">
+            <div className="flex items-center gap-2 mb-2">
+              <XCircle className="h-4 w-4 text-red-600" />
+              <p className="text-sm font-medium text-red-900">Configuration Errors</p>
+            </div>
+            <ul className="text-xs text-red-800 space-y-1 ml-6">
               {health.config.errors.map((err, i) => (
-                <li key={i}>{err}</li>
+                <li key={i} className="list-disc">{err}</li>
               ))}
             </ul>
           </div>
         )}
 
-        {health.config.warnings.length > 0 && (
+        {/* Critical Warnings */}
+        {criticalWarnings.length > 0 && (
           <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p className="text-sm font-medium text-yellow-900 mb-2">Warnings:</p>
-            <ul className="text-xs text-yellow-800 space-y-1 list-disc list-inside">
-              {health.config.warnings.map((warn, i) => (
-                <li key={i}>{warn}</li>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <p className="text-sm font-medium text-yellow-900">Warnings</p>
+            </div>
+            <ul className="text-xs text-yellow-800 space-y-1 ml-6">
+              {criticalWarnings.map((warn, i) => (
+                <li key={i} className="list-disc">{warn}</li>
               ))}
             </ul>
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground">
-          Last checked: {new Date(health.timestamp).toLocaleTimeString()}
-        </p>
+        {/* Tracking URL Info (non-critical, shown as info) */}
+        {trackingWarning && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs font-medium text-blue-900 mb-1">Email Tracking</p>
+                <p className="text-xs text-blue-800">
+                  Tracking URL not configured. Email opens will still be tracked, but tracking pixel URLs may use a default domain.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

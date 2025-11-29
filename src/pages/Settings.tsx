@@ -244,10 +244,10 @@ export function Settings() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Manage your account and integrations</p>
+    <div className="space-y-6 max-w-4xl">
+      <div className="pb-2">
+        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <p className="text-muted-foreground mt-1.5">Manage your account and integrations</p>
       </div>
 
       <SystemStatus />
@@ -267,18 +267,21 @@ export function Settings() {
           )}
           
           {loading ? (
-            <div className="text-muted-foreground">Checking connection...</div>
+            <div className="flex items-center gap-2 text-muted-foreground py-4">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Checking connection...</span>
+            </div>
           ) : (
             <>
               {gmailAccounts.length > 0 ? (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    <span className="font-medium">{gmailAccounts.length} Gmail account{gmailAccounts.length !== 1 ? 's' : ''} connected</span>
+                    <span className="font-medium text-sm">{gmailAccounts.length} Gmail account{gmailAccounts.length !== 1 ? 's' : ''} connected</span>
                   </div>
                   <div className="space-y-2">
                     {gmailAccounts.map((account) => (
-                      <div key={account.email} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                      <div key={account.email} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
                         <span className="text-sm font-medium">{account.email}</span>
                         <Button
                           variant="ghost"
@@ -286,21 +289,21 @@ export function Settings() {
                           onClick={() => handleRemoveAccount(account.email)}
                           className="text-red-600 hover:text-red-700 hover:bg-red-50"
                         >
-                          <Trash2 className="h-4 w-4 mr-1" />
+                          <Trash2 className="h-4 w-4 mr-1.5" />
                           Remove
                         </Button>
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground pt-1">
                     Emails will be sent from your connected Gmail account. Add more accounts or connect custom domains in Email Accounts section.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <XCircle className="h-5 w-5 text-yellow-500" />
-                    <span>No Gmail account connected</span>
+                    <span className="text-sm">No Gmail account connected</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Connect your Gmail to send from your own address. You can also add custom domain email accounts below.
@@ -308,7 +311,7 @@ export function Settings() {
                 </div>
               )}
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <Button 
                   onClick={handleConnectGmail} 
                   disabled={!import.meta.env.VITE_GOOGLE_CLIENT_ID || import.meta.env.VITE_GOOGLE_CLIENT_ID === 'placeholder-client-id'}
@@ -326,8 +329,8 @@ export function Settings() {
               </div>
 
               {(!import.meta.env.VITE_GOOGLE_CLIENT_ID || import.meta.env.VITE_GOOGLE_CLIENT_ID === 'placeholder-client-id') && (
-                <p className="text-xs text-muted-foreground">
-                  Configure Google OAuth credentials in <code className="bg-gray-100 px-1 rounded">.env</code> to enable Gmail connection.
+                <p className="text-xs text-muted-foreground pt-1">
+                  Configure Google OAuth credentials in <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">.env</code> to enable Gmail connection.
                 </p>
               )}
             </>
@@ -346,7 +349,7 @@ export function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3">
-            <Label>Test Email Addresses</Label>
+            <Label className="text-sm font-medium">Test Email Addresses</Label>
             {testEmails.map((email, index) => (
               <div key={index} className="flex items-center gap-2">
                 <Input
@@ -377,13 +380,14 @@ export function Settings() {
               <Plus className="mr-2 h-4 w-4" />
               Add Another Email
             </Button>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground pt-1">
               These emails will receive test sends when you click "Test Send" on a campaign
             </p>
           </div>
           <Button 
             onClick={handleSaveTestEmail} 
             disabled={savingTestEmail}
+            className="mt-2"
           >
             {savingTestEmail ? 'Saving...' : 'Save Test Emails'}
           </Button>
@@ -394,18 +398,18 @@ export function Settings() {
         <CardHeader>
           <CardTitle>MailSurge Account</CardTitle>
           <CardDescription>
-            Your MailSurge account information (separate from Gmail integration)
+            Your MailSurge account information
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            <div>
-              <span className="text-sm text-muted-foreground">Email:</span>
-              <span className="ml-2">{user?.email}</span>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+              <span className="text-sm font-medium text-muted-foreground">Email</span>
+              <span className="text-sm font-medium">{user?.email}</span>
             </div>
-            <div>
-              <span className="text-sm text-muted-foreground">User ID:</span>
-              <span className="ml-2 font-mono text-xs">{user?.id}</span>
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+              <span className="text-sm font-medium text-muted-foreground">User ID</span>
+              <span className="text-xs font-mono text-muted-foreground">{user?.id}</span>
             </div>
           </div>
         </CardContent>

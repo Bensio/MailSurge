@@ -20,7 +20,8 @@ import {
   Mail, 
   Globe, 
   Loader2,
-  X
+  X,
+  Info
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getGmailAuthUrl } from '@/lib/gmail';
@@ -509,44 +510,48 @@ export function EmailAccounts() {
             {accounts.map((account) => (
               <div
                 key={account.id}
-                className="p-4 border rounded-lg space-y-3"
+                className="p-4 border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-colors"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">{account.email_address}</span>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-medium text-sm truncate">{account.email_address}</span>
                       {account.is_default && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                           Default
                         </span>
                       )}
                     </div>
-                    <div className="text-sm text-muted-foreground space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span>Type: {getAccountTypeLabel(account.account_type)}</span>
+                    <div className="text-xs text-muted-foreground space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>Type: <span className="font-medium">{getAccountTypeLabel(account.account_type)}</span></span>
                         {account.esp_provider && (
-                          <span>• Provider: {getProviderLabel(account.esp_provider)}</span>
+                          <>
+                            <span className="text-gray-300">•</span>
+                            <span>Provider: <span className="font-medium">{getProviderLabel(account.esp_provider)}</span></span>
+                          </>
                         )}
                       </div>
                       {account.domain_name && (
                         <div className="flex items-center gap-2">
-                          <Globe className="h-3 w-3" />
-                          <span>Domain: {account.domain_name}</span>
+                          <Globe className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">Domain: {account.domain_name}</span>
                           {account.domain_verified ? (
-                            <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
                           ) : (
-                            <XCircle className="h-3 w-3 text-yellow-500" />
+                            <XCircle className="h-3 w-3 text-yellow-500 flex-shrink-0" />
                           )}
                         </div>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     {!account.is_default && (
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleSetDefault(account.id)}
+                        className="text-xs"
                       >
                         Set Default
                       </Button>
@@ -557,11 +562,12 @@ export function EmailAccounts() {
                         size="sm"
                         onClick={() => handleVerifyDomain(account.id)}
                         disabled={verifyingDomain === account.id}
+                        className="text-xs"
                       >
                         {verifyingDomain === account.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          'Verify Domain'
+                          'Verify'
                         )}
                       </Button>
                     )}
@@ -581,10 +587,10 @@ export function EmailAccounts() {
         )}
 
         {!showAddForm ? (
-          <div className="flex gap-2 pt-4 border-t">
-            <Button onClick={handleConnectGoogle} variant="outline">
+          <div className="flex flex-wrap gap-2 pt-4 border-t">
+            <Button onClick={handleConnectGoogle} variant="outline" className="flex-1 min-w-[140px]">
               <Mail className="mr-2 h-4 w-4" />
-              Connect Google Workspace
+              Connect Google
             </Button>
             <Button 
               onClick={() => {
@@ -592,23 +598,24 @@ export function EmailAccounts() {
                 setShowAddForm(true);
               }}
               variant="outline"
+              className="flex-1 min-w-[140px]"
             >
               <Globe className="mr-2 h-4 w-4" />
-              Add Custom Domain (ESP)
+              Add Domain
             </Button>
             <Button
               variant="outline"
               onClick={loadAccounts}
               disabled={loading}
+              className="flex-shrink-0"
             >
-              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
         ) : (
-          <div className="p-4 border rounded-lg space-y-4 bg-gray-50">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium">
+          <div className="p-4 border border-gray-200 rounded-lg space-y-4 bg-gray-50">
+            <div className="flex items-center justify-between pb-2 border-b">
+              <h3 className="font-medium text-sm">
                 {formType === 'google' && 'Connect Google Workspace'}
                 {formType === 'microsoft' && 'Connect Microsoft 365'}
                 {formType === 'esp' && 'Add Custom Domain (ESP)'}
@@ -626,6 +633,7 @@ export function EmailAccounts() {
                     domainName: '',
                   });
                 }}
+                className="h-8 w-8 p-0"
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -720,13 +728,18 @@ export function EmailAccounts() {
                   </Button>
                 </div>
 
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-                  <p className="font-medium mb-1">After adding your account:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-xs">
-                    <li>Add the required DNS records (SPF, DKIM, DMARC) to your domain</li>
-                    <li>Click "Verify Domain" to check if DNS records are configured correctly</li>
-                    <li>Once verified, you can use this account to send campaigns</li>
-                  </ol>
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs font-medium text-blue-900 mb-2">After adding your account:</p>
+                      <ol className="list-decimal list-inside space-y-1 text-xs text-blue-800">
+                        <li>Add the required DNS records (SPF, DKIM, DMARC) to your domain</li>
+                        <li>Click "Verify Domain" to check if DNS records are configured correctly</li>
+                        <li>Once verified, you can use this account to send campaigns</li>
+                      </ol>
+                    </div>
+                  </div>
                 </div>
               </>
             )}
