@@ -128,6 +128,110 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data || []);
       }
 
+      // GET /api/campaigns?type=email-accounts - List user's email accounts
+      if (type === 'email-accounts') {
+        const { data, error } = await supabase
+          .from('user_email_accounts')
+          .select('id, account_type, email_address, display_name, is_default, domain_name, domain_verified, esp_provider, created_at, updated_at')
+          .eq('user_id', user.id)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: false });
+        
+        if (error) {
+          console.error('[Email Accounts] Database error:', error);
+          return res.status(500).json({ error: error.message });
+        }
+        return res.json(data || []);
+      }
+
+      // GET /api/campaigns?type=verify-domain&account_id=xxx - Verify domain DNS records
+      if (type === 'verify-domain') {
+        const { account_id } = req.query;
+        
+        if (!account_id || typeof account_id !== 'string') {
+          return res.status(400).json({ error: 'account_id is required' });
+        }
+        
+        try {
+          // Get account
+          const { data: account, error: accountError } = await supabase
+            .from('user_email_accounts')
+            .select('*')
+            .eq('id', account_id)
+            .eq('user_id', user.id)
+            .single();
+          
+          if (accountError || !account) {
+            return res.status(404).json({ error: 'Email account not found' });
+          }
+          
+          if (account.account_type !== 'esp_domain' || !account.domain_name) {
+            return res.status(400).json({ error: 'Domain verification only available for ESP domain accounts' });
+          }
+          
+          const { 
+            verifyDomainOwnership, 
+            verifySPFRecord, 
+            verifyDKIMRecord, 
+            verifyDMARCRecord 
+          } = await import('./lib/dns-verification');
+          
+          const domain = account.domain_name;
+          const verificationResults: any = {
+            domain,
+            ownership: false,
+            spf: { valid: false },
+            dkim: { valid: false },
+            dmarc: { valid: false },
+          };
+          
+          // Verify ownership
+          if (account.domain_verification_token) {
+            verificationResults.ownership = await verifyDomainOwnership(
+              domain, 
+              account.domain_verification_token
+            );
+          }
+          
+          // Verify SPF
+          verificationResults.spf = await verifySPFRecord(domain);
+          
+          // Verify DKIM (try common selectors)
+          const dkimSelectors = ['default', 's1', 's2', 'mail'];
+          for (const selector of dkimSelectors) {
+            const dkimResult = await verifyDKIMRecord(domain, selector);
+            if (dkimResult.valid) {
+              verificationResults.dkim = dkimResult;
+              break;
+            }
+          }
+          
+          // Verify DMARC
+          verificationResults.dmarc = await verifyDMARCRecord(domain);
+          
+          // Update domain_verified if all checks pass
+          const allVerified = verificationResults.ownership && 
+                             verificationResults.spf.valid && 
+                             verificationResults.dkim.valid && 
+                             verificationResults.dmarc.valid;
+          
+          if (allVerified && !account.domain_verified) {
+            await supabase
+              .from('user_email_accounts')
+              .update({ domain_verified: true })
+              .eq('id', account_id);
+          }
+          
+          return res.json(verificationResults);
+        } catch (error) {
+          console.error('[Domain Verification] Error:', error);
+          return res.status(500).json({ 
+            error: 'Failed to verify domain', 
+            details: error instanceof Error ? error.message : 'Unknown error' 
+          });
+        }
+      }
+
       // GET /api/campaigns - List campaigns (default)
       const { data: campaigns, error } = await supabase
         .from('campaigns')
@@ -279,6 +383,196 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // POST /api/campaigns?type=email-accounts - Create email account
+    if (type === 'email-accounts') {
+      try {
+        const { encrypt } = await import('./lib/encryption');
+        const { account_type, email_address, display_name, esp_provider, esp_api_key, domain_name } = req.body;
+        
+        // Validate required fields
+        if (!account_type || !email_address) {
+          return res.status(400).json({ error: 'account_type and email_address are required' });
+        }
+        
+        if (!['google_oauth', 'microsoft_oauth', 'esp_domain'].includes(account_type)) {
+          return res.status(400).json({ error: 'Invalid account_type' });
+        }
+        
+        // For ESP accounts, validate additional fields
+        if (account_type === 'esp_domain') {
+          if (!esp_provider || !esp_api_key || !domain_name) {
+            return res.status(400).json({ error: 'esp_provider, esp_api_key, and domain_name are required for ESP accounts' });
+          }
+          if (!['sendgrid', 'postmark', 'ses', 'mailgun'].includes(esp_provider)) {
+            return res.status(400).json({ error: 'Invalid esp_provider' });
+          }
+        }
+        
+        // Check if email already exists for this user
+        const { data: existing } = await supabase
+          .from('user_email_accounts')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('email_address', email_address)
+          .single();
+        
+        if (existing) {
+          return res.status(409).json({ error: 'Email account already exists' });
+        }
+        
+        // Check if this will be the first account (set as default)
+        const { count } = await supabase
+          .from('user_email_accounts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id);
+        
+        const isDefault = (count || 0) === 0;
+        
+        // Prepare account data
+        const accountData: any = {
+          user_id: user.id,
+          account_type,
+          email_address,
+          display_name: display_name || email_address,
+          is_default: isDefault,
+        };
+        
+        // Add ESP-specific fields if applicable
+        if (account_type === 'esp_domain') {
+          accountData.esp_provider = esp_provider;
+          accountData.esp_api_key_encrypted = encrypt(esp_api_key);
+          accountData.domain_name = domain_name;
+          accountData.domain_verified = false;
+        }
+        
+        const { data: account, error } = await supabase
+          .from('user_email_accounts')
+          .insert(accountData)
+          .select('id, account_type, email_address, display_name, is_default, domain_name, domain_verified, esp_provider, created_at')
+          .single();
+        
+        if (error) {
+          console.error('[Email Accounts] Create error:', error);
+          return res.status(500).json({ error: error.message });
+        }
+        
+        return res.status(201).json(account);
+      } catch (error) {
+        console.error('[Email Accounts] Unexpected error:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return res.status(500).json({ error: 'Internal server error', details: errorMessage });
+      }
+    }
+
+    // POST /api/campaigns?type=test-email-account - Test email account connection
+    if (type === 'test-email-account') {
+      try {
+        const { account_id, esp_api_key } = req.body;
+        
+        if (!account_id) {
+          return res.status(400).json({ error: 'account_id is required' });
+        }
+        
+        // Get account
+        const { data: account, error: accountError } = await supabase
+          .from('user_email_accounts')
+          .select('*')
+          .eq('id', account_id)
+          .eq('user_id', user.id)
+          .single();
+        
+        if (accountError || !account) {
+          return res.status(404).json({ error: 'Email account not found' });
+        }
+        
+        // Test based on account type
+        if (account.account_type === 'esp_domain') {
+          // Test ESP connection
+          const apiKey = esp_api_key || (account.esp_api_key_encrypted ? (await import('./lib/encryption')).decrypt(account.esp_api_key_encrypted) : null);
+          
+          if (!apiKey) {
+            return res.status(400).json({ error: 'ESP API key required for testing' });
+          }
+          
+          // Test with SendGrid (for now, can expand later)
+          if (account.esp_provider === 'sendgrid') {
+            try {
+              const response = await fetch('https://api.sendgrid.com/v3/user/profile', {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              
+              if (response.ok) {
+                return res.json({ 
+                  success: true, 
+                  message: 'ESP connection successful',
+                  provider: account.esp_provider 
+                });
+              } else {
+                const errorData = await response.json().catch(() => ({}));
+                return res.status(400).json({ 
+                  success: false, 
+                  error: 'ESP connection failed', 
+                  details: errorData 
+                });
+              }
+            } catch (testError) {
+              return res.status(500).json({ 
+                success: false, 
+                error: 'Failed to test ESP connection', 
+                details: testError instanceof Error ? testError.message : 'Unknown error' 
+              });
+            }
+          }
+          
+          return res.status(400).json({ error: `Testing not yet implemented for ${account.esp_provider}` });
+        } else if (account.account_type === 'google_oauth') {
+          // Test Google OAuth (check if token is valid)
+          if (!account.google_token) {
+            return res.status(400).json({ error: 'Google OAuth token not found' });
+          }
+          
+          // Try to refresh token to verify it's valid
+          const { google } = await import('googleapis');
+          let redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+          if (!redirectUri.startsWith('http://') && !redirectUri.startsWith('https://')) {
+            redirectUri = `https://${redirectUri}`;
+          }
+          
+          const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            redirectUri
+          );
+          
+          oauth2Client.setCredentials({
+            access_token: account.google_token,
+            refresh_token: account.google_refresh_token,
+          });
+          
+          try {
+            const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+            await gmail.users.getProfile({ userId: 'me' });
+            return res.json({ success: true, message: 'Google OAuth connection valid' });
+          } catch (oauthError) {
+            return res.status(400).json({ 
+              success: false, 
+              error: 'Google OAuth connection invalid', 
+              details: oauthError instanceof Error ? oauthError.message : 'Unknown error' 
+            });
+          }
+        }
+        
+        return res.status(400).json({ error: 'Account type not supported for testing' });
+      } catch (error) {
+        console.error('[Test Email Account] Unexpected error:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+
     // POST /api/campaigns?type=reminders - Create reminder rule
     if (type === 'reminders') {
       try {
@@ -415,6 +709,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // PUT /api/campaigns?type=email-accounts&id=xxx - Update email account
+  if (req.method === 'PUT' && req.query.type === 'email-accounts') {
+    const { id } = req.query;
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({ error: 'Account ID required' });
+    }
+
+    try {
+      const { encrypt } = await import('./lib/encryption');
+      const { display_name, is_default, esp_api_key, domain_name } = req.body;
+
+      // Get existing account
+      const { data: existingAccount, error: fetchError } = await supabase
+        .from('user_email_accounts')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
+
+      if (fetchError || !existingAccount) {
+        return res.status(404).json({ error: 'Email account not found' });
+      }
+
+      const updateData: any = {};
+      
+      if (display_name !== undefined) updateData.display_name = display_name;
+      if (domain_name !== undefined) updateData.domain_name = domain_name;
+      
+      // Handle default account switching
+      if (is_default === true) {
+        // Unset other default accounts
+        await supabase
+          .from('user_email_accounts')
+          .update({ is_default: false })
+          .eq('user_id', user.id)
+          .neq('id', id);
+        
+        updateData.is_default = true;
+      } else if (is_default === false) {
+        // Check if this is the only account (can't unset if it's the only one)
+        const { count } = await supabase
+          .from('user_email_accounts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id);
+        
+        if (count === 1) {
+          return res.status(400).json({ error: 'Cannot unset default account when it is the only account' });
+        }
+        
+        updateData.is_default = false;
+      }
+      
+      // Update ESP API key if provided
+      if (esp_api_key !== undefined && existingAccount.account_type === 'esp_domain') {
+        updateData.esp_api_key_encrypted = encrypt(esp_api_key);
+      }
+
+      const { data: account, error } = await supabase
+        .from('user_email_accounts')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select('id, account_type, email_address, display_name, is_default, domain_name, domain_verified, esp_provider, created_at, updated_at')
+        .single();
+      
+      if (error) {
+        console.error('[Email Accounts] Update error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+      if (!account) return res.status(404).json({ error: 'Account not found' });
+      
+      return res.json(account);
+    } catch (error) {
+      console.error('[Email Accounts] Update unexpected error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
   // PUT /api/campaigns?type=reminders&id=xxx - Update reminder rule
   if (req.method === 'PUT' && req.query.type === 'reminders') {
     const { id } = req.query;
@@ -445,6 +817,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!data) return res.status(404).json({ error: 'Rule not found' });
     
     return res.json(data);
+  }
+
+  // DELETE /api/campaigns?type=email-accounts&id=xxx - Delete email account
+  if (req.method === 'DELETE' && req.query.type === 'email-accounts') {
+    const { id } = req.query;
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({ error: 'Account ID required' });
+    }
+
+    try {
+      // Check if this is the only account
+      const { count } = await supabase
+        .from('user_email_accounts')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+      
+      if (count === 1) {
+        return res.status(400).json({ error: 'Cannot delete the only email account. Please add another account first.' });
+      }
+      
+      // Get account to check if it's default
+      const { data: account } = await supabase
+        .from('user_email_accounts')
+        .select('is_default')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
+      
+      const { error } = await supabase
+        .from('user_email_accounts')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      
+      if (error) {
+        console.error('[Email Accounts] Delete error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+      
+      // If deleted account was default, set another as default
+      if (account?.is_default) {
+        const { data: otherAccount } = await supabase
+          .from('user_email_accounts')
+          .select('id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .single();
+        
+        if (otherAccount) {
+          await supabase
+            .from('user_email_accounts')
+            .update({ is_default: true })
+            .eq('id', otherAccount.id);
+        }
+      }
+      
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('[Email Accounts] Delete unexpected error:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   }
 
   // DELETE /api/campaigns?type=reminders&id=xxx - Delete reminder rule
